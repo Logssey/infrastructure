@@ -1,4 +1,4 @@
-name: 버그
+name: 버그 신고
 description: 예상과 다르게 동작하거나 수정이 필요한 문제를 등록합니다.
 title: "[Bug] "
 labels: []

@@ -1,4 +1,4 @@
-name: 작업
+name: 작업 등록
 description: 구현, 인프라, 검증, 문서화 등 일반 작업을 등록합니다.
 title: "[Task] "
 labels: []
