@@ -25,3 +25,8 @@ output "nat_gateway_public_ip" {
 output "ami_id" {
   value = module.compute.ami_id
 }
+
+output "route53_name_servers" {
+  description = "도메인 등록기관에 입력할 NS 레코드"
+  value       = module.edge.name_servers
+}

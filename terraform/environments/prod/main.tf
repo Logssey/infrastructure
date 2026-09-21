@@ -54,3 +54,10 @@ module "compute" {
   worker_private_ips        = var.worker_private_ips
   redis_private_ip          = var.redis_private_ip
 }
+
+module "edge" {
+  source = "../../modules/edge"
+
+  name_prefix = local.name_prefix
+  domain_name = var.domain_name
+}

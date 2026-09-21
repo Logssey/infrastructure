@@ -132,3 +132,9 @@ variable "redis_private_ip" {
   type        = string
   default     = "10.20.10.30"
 }
+
+variable "domain_name" {
+  description = "서비스 도메인. 가비아에서 구매"
+  type        = string
+  default     = "re-used.store"
+}
