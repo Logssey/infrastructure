@@ -32,3 +32,18 @@ output "private_data_subnet_ids" {
   description = "Private-Data Subnet ID 목록"
   value       = aws_subnet.private_data[*].id
 }
+
+output "private_app_route_table_id" {
+  description = "Private-App Route Table ID"
+  value       = aws_route_table.private_app.id
+}
+
+output "private_etcd_route_table_id" {
+  description = "Private-Etcd Route Table ID"
+  value       = aws_route_table.private_etcd.id
+}
+
+output "nat_gateway_public_ip" {
+  description = "NAT Gateway 퍼블릭 IP. 외부 서비스 IP 허용목록 등록에 사용한다."
+  value       = aws_eip.nat.public_ip
+}
