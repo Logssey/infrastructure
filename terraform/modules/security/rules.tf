@@ -206,3 +206,38 @@ resource "aws_vpc_security_group_ingress_rule" "etcd_client_internal" {
   to_port                      = 2379
   description                  = "etcd client between members"
 }
+
+# ── 15. Cilium health check (ICMP) ──
+# cilium-health 의 노드 간 프로브가 ICMP 를 사용한다.
+# 없으면 Cluster health 가 1/N reachable 로 표시된다.
+resource "aws_vpc_security_group_ingress_rule" "k8s_node_icmp" {
+  security_group_id            = aws_security_group.k8s_node.id
+  referenced_security_group_id = aws_security_group.k8s_node.id
+  ip_protocol                  = "icmp"
+  from_port                    = -1
+  to_port                      = -1
+  description                  = "Cilium health check (ICMP)"
+}
+
+# ── 16. Worker → Control Plane (apiserver 직접) ──
+# Cilium kube-proxy replacement 사용 시 eBPF 가 Service IP 를
+# 백엔드(CP 노드의 6443)로 직접 변환한다. Internal NLB 를 거치지 않으므로
+# Worker 에서 Control Plane 으로의 직접 경로가 필요하다.
+resource "aws_vpc_security_group_ingress_rule" "control_plane_from_worker" {
+  security_group_id            = aws_security_group.control_plane.id
+  referenced_security_group_id = aws_security_group.worker.id
+  ip_protocol                  = "tcp"
+  from_port                    = 6443
+  to_port                      = 6443
+  description                  = "apiserver from worker (kube-proxy replacement)"
+}
+
+# CP 노드끼리도 필요하다. CP 위의 Pod 도 같은 경로를 쓴다.
+resource "aws_vpc_security_group_ingress_rule" "control_plane_internal_6443" {
+  security_group_id            = aws_security_group.control_plane.id
+  referenced_security_group_id = aws_security_group.control_plane.id
+  ip_protocol                  = "tcp"
+  from_port                    = 6443
+  to_port                      = 6443
+  description                  = "apiserver between control planes"
+}
