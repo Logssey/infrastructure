@@ -47,7 +47,6 @@ cd inventory/logssey/group_vars/k8s_cluster
 sed -i 's|^kube_network_plugin: calico|kube_network_plugin: cilium|' k8s-cluster.yml
 sed -i 's|^kube_service_addresses: 10.233.0.0/18|kube_service_addresses: 10.96.0.0/16|' k8s-cluster.yml
 sed -i 's|^kube_pods_subnet: 10.233.64.0/18|kube_pods_subnet: 10.244.0.0/16|' k8s-cluster.yml
-sed -i 's|^kube_proxy_mode: ipvs|kube_proxy_mode: iptables|' k8s-cluster.yml
 ```
 
 ### NLB 주소

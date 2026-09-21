@@ -65,6 +65,22 @@ CP_A=$(aws ec2 describe-instances \
 aws ssm start-session --target $CP_A --region ap-northeast-1
 ```
 
+### 클러스터 접속
+
+kubectl은 Control Plane 노드에서 실행한다.
+
+```bash
+aws ssm start-session --target $CP_A --region ap-northeast-1
+sudo su - ubuntu
+kubectl get nodes
+```
+
+Kubespray 실행 환경은 `~/kubespray`에 있다.
+
+```bash
+cd ~/kubespray && source .venv/bin/activate
+```
+
 ---
 
 ## 상태 관리
@@ -204,8 +220,8 @@ terraform apply -var="security_mode=strict"
 | --- | --- |
 | Cloud | AWS (ap-northeast-1) |
 | IaC | Terraform |
-| Kubernetes | Kubespray (Self-managed) |
-| CNI | Cilium |
+| Kubernetes | 1.35.4 (Kubespray v2.31.0) |
+| CNI | Cilium 1.19.3 (VXLAN, kube-proxy replacement) |
 | Ingress | Envoy Gateway |
 | 도메인 | re-used.store |
 
@@ -223,6 +239,7 @@ terraform/
     edge/               Route53, CloudFront, ACM
 kubespray/              클러스터 인벤토리 및 변수
 docs/                   구현 명세
+  troubleshooting/      구축 중 문제 해결 기록
 ```
 
 ## 문서
@@ -234,3 +251,5 @@ docs/                   구현 명세
 | [03-iam.md](docs/03-iam.md) | IAM Role, 최소 권한 계획 |
 | [04-compute.md](docs/04-compute.md) | 노드 스펙, 사설 IP, user_data |
 | [05-loadbalancer.md](docs/05-loadbalancer.md) | NLB 구성, Client IP Preservation |
+| [06-kubespray.md](docs/06-kubespray.md) | 클러스터 구축, Cilium 설정 |
+| [troubleshooting/](docs/troubleshooting/) | 구축 중 발생한 문제와 해결 과정 |
