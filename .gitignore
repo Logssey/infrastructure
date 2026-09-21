@@ -1,15 +1,15 @@
 # Terraform
-.terraform/              # provider 바이너리. 수백 MB라 커밋하면 안 됨
-*.tfstate                # 실제 인프라 상태. DB 비밀번호 등 평문 포함
-*.tfstate.*              # 상태 백업 파일
-crash.log                # Terraform 비정상 종료 로그
-*.tfvars                 # 변수 실제값. 시크릿이 들어감
-!example.tfvars          # 예시 파일은 커밋 (값 없이 키만)
+.terraform/
+*.tfstate  
+*.tfstate.*
+crash.log
+*.tfvars
+!example.tfvars
 
 # 시크릿
-.env                     # 환경변수
-*.pem                    # SSH 키, 인증서 개인키
-credentials              # AWS 자격증명
+.env
+*.pem
+credentials
 
 # OS
 .DS_Store
