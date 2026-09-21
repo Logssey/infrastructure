@@ -1,0 +1,43 @@
+# inventory/sample/group_vars/k8s_cluster/k8s-net-cilium.yml 끝에 추가한다.
+
+# ─────────────────────────────────────────────
+# 캡슐화
+#
+# AWS 멀티 서브넷 환경에서는 캡슐화가 필수다.
+# 캡슐화 없는 라우팅 모드는 Pod 경로가 노드 커널 라우팅 테이블에만
+# 등록되는데, AWS VPC 라우터는 이를 인지하지 못해
+# Subnet 이 다른 노드 간 통신이 드롭된다.
+#
+# Kubespray 기본값이 이미 vxlan 이므로 명시만 한다.
+# ─────────────────────────────────────────────
+
+cilium_tunnel_mode: vxlan
+
+# ─────────────────────────────────────────────
+# kube-proxy replacement
+#
+# 당초 미적용으로 설계했으나 kube-proxy 와 병행 시
+# Service ClusterIP 접속이 실패해 전환했다.
+# 커널 7.0 으로 요구사항(5.8+)을 충족한다.
+#
+# 전환 시 sg-worker -> sg-control-plane:6443 규칙이 필요하다.
+# eBPF 가 Service IP 를 CP 노드로 직접 변환해 NLB 를 거치지 않는다.
+# ─────────────────────────────────────────────
+
+cilium_kube_proxy_replacement: true
+
+# ─────────────────────────────────────────────
+# Hubble
+#
+# cilium_enable_hubble 만으로는 agent 기능만 켜진다.
+# 클러스터 전체 흐름을 보려면 cilium_hubble_install 로
+# Relay 를 함께 설치해야 한다.
+#
+# UI 는 메모리 300Mi 를 추가로 쓰므로 1차에서는 제외하고
+# hubble CLI 로 조회한다.
+# ─────────────────────────────────────────────
+
+cilium_enable_hubble: true
+cilium_hubble_install: true
+cilium_hubble_tls_generate: true
+cilium_enable_hubble_ui: false

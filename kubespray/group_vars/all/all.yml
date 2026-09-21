@@ -1,0 +1,22 @@
+# inventory/sample/group_vars/all/all.yml 끝에 추가한다.
+#
+# ─────────────────────────────────────────────
+# External Load Balancer (Internal NLB)
+#
+# apiserver_loadbalancer_domain_name 을 지정해야
+# apiserver 인증서 SAN 에 NLB 도메인이 포함된다.
+# 없으면 NLB 주소로 접속할 때 TLS 검증이 실패한다.
+#
+# loadbalancer_apiserver_localhost 는 기본값이 true 이며
+# 노드마다 로컬 nginx 프록시를 띄운다. 외부 LB 와 충돌하므로 끈다.
+#
+# 주소는 terraform output internal_api_dns_name 으로 확인한다.
+# ─────────────────────────────────────────────
+
+apiserver_loadbalancer_domain_name: "logssey-prod-nlb-internal-api-5201b55cdbb1d44e.elb.ap-northeast-1.amazonaws.com"
+
+loadbalancer_apiserver:
+  address: "logssey-prod-nlb-internal-api-5201b55cdbb1d44e.elb.ap-northeast-1.amazonaws.com"
+  port: 6443
+
+loadbalancer_apiserver_localhost: false

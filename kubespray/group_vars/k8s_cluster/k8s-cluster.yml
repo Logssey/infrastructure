@@ -1,0 +1,29 @@
+# inventory/sample/group_vars/k8s_cluster/k8s-cluster.yml 을 아래와 같이 수정한다.
+#
+# 기존 값 변경 (sed 로 치환)
+#   kube_network_plugin:    calico         -> cilium
+#   kube_service_addresses: 10.233.0.0/18  -> 10.96.0.0/16
+#   kube_pods_subnet:       10.233.64.0/18 -> 10.244.0.0/16
+#   kube_proxy_mode:        ipvs           -> iptables
+#
+# 아래는 파일 끝에 추가한다.
+
+# ─────────────────────────────────────────────
+# Kubernetes 버전 고정
+# 미지정 시 Kubespray 가 아는 최신 버전이 적용된다.
+# v 접두사를 붙이지 않는다.
+# ─────────────────────────────────────────────
+
+kube_version: 1.35.4
+
+# ─────────────────────────────────────────────
+# kube-proxy 제거
+#
+# Cilium kube-proxy replacement 사용 시 kube-proxy 를 제거한다.
+# 병행하면 iptables/IPVS 규칙과 eBPF 가 같은 Service 를 처리하며 충돌한다.
+#
+# cilium_kube_proxy_replacement: true 만으로도 Kubespray 가
+# addon/kube-proxy 를 건너뛰나, 명시적으로 지정한다.
+# ─────────────────────────────────────────────
+
+kube_proxy_remove: true
