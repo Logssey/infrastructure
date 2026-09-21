@@ -18,6 +18,16 @@ terraform apply -var="security_mode=strict"
 개방 규칙을 별도 리소스로 두고 `count`로 분기한다. SG 규칙은 합집합으로 평가되므로
 `permissive` 상태에서는 개방 규칙이 우선 적용되고, 제거하면 체인 규칙만 남는다.
 
+## 태그 정책
+
+Security Group 8개에는 `Name` 태그를 부착한다.
+
+체인 규칙에는 태그를 부착하지 않고 `description`으로 용도를 남긴다.
+SG 규칙 단위 태그는 provider 5.x에서 도입된 기능이며 `description`과 정보가 중복되고 규칙 수가 많아질수록 관리 부담만 늘어난다.
+
+개방 규칙에만 `Name`과 `Tier = T2-remove` 태그를 부착한다.
+콘솔에서 이름이 표시되는 규칙이 곧 제거 대상이 되어 식별이 쉬워진다.
+
 ## Security Group 목록
 
 | 이름 | 부착 대상 |
@@ -40,6 +50,7 @@ terraform apply -var="security_mode=strict"
 | 1 | CloudFront Prefix List | sg-public-nlb | TCP 443 | WAF 우회 차단 |
 | 2 | sg-public-nlb | sg-worker | TCP 30080 | Envoy Gateway NodePort |
 | 3 | sg-worker | sg-internal-nlb | TCP 6443 | kubelet → apiserver |
+| 3-b | sg-control-plane | sg-internal-nlb | TCP 6443 | control plane → apiserver |
 | 4 | sg-internal-nlb | sg-control-plane | TCP 6443 | apiserver |
 | 5 | sg-control-plane | sg-etcd | TCP 2379 | etcd client |
 | 6 | sg-etcd | sg-etcd | TCP 2380 | etcd peer (Raft) |
@@ -92,3 +103,27 @@ Overlay CNI 구성에서 Pod가 VPC 외부로 나갈 때 출발지 IP가 노드 
 
 **NetworkPolicy가 없으면 워커의 모든 Pod가 RDS와 Redis에 접근할 수 있다.**
 SG는 계층 경계만 담당하고 실질적 통제는 Cilium NetworkPolicy가 수행한다.
+
+
+## 확인
+
+제거 대상 규칙 조회
+
+```bash
+aws ec2 describe-security-group-rules \
+  --filters "Name=tag:Tier,Values=T2-remove" \
+  --region ap-northeast-1 \
+  --query 'SecurityGroupRules[].[Description,FromPort,ToPort,CidrIpv4]' \
+  --output table
+```
+
+특정 SG의 인바운드 규칙 조회
+
+```bash
+aws ec2 describe-security-group-rules \
+  --filters "Name=group-id,Values=<SG_ID>" \
+  --region ap-northeast-1 \
+  --query 'SecurityGroupRules[?!IsEgress].[FromPort,CidrIpv4,ReferencedGroupInfo.GroupId,Description]' \
+  --output table
+```
+

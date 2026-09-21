@@ -4,8 +4,9 @@
 
 ## 확정값
 
-리전: ap-northeast-1
-AZ:   1a / 1c / 1d
+리전: ap-northeast-1   
+AZ:    ap-northeast-1a / 1c / 1d
+      (1b는 신규 계정에 제공되지 않는다)
 
 ### VPC
 
@@ -35,8 +36,8 @@ AZ:   1a / 1c / 1d
 | 이름 | 연결 Subnet | 경로 |
 | --- | --- | --- |
 | logssey-prod-rt-public | Public ×3 | 0.0.0.0/0 → IGW |
-| logssey-prod-rt-app | App ×3 | 0.0.0.0/0 → NAT-a, S3 PL → GWE |
-| logssey-prod-rt-etcd | Etcd ×3 | 0.0.0.0/0 → NAT-a, S3 PL → GWE |
+| logssey-prod-rt-app | App ×3 | 0.0.0.0/0 → NAT-a, S3 Prefix List → S3 Gateway Endpoint |
+| logssey-prod-rt-etcd | Etcd ×3 | 0.0.0.0/0 → NAT-a, S3 Prefix List → S3 Gateway Endpoint |
 | logssey-prod-rt-data | Data ×3 | local only |
 
 ### 기타
@@ -58,3 +59,19 @@ AZ:   1a / 1c / 1d
 ### 확장 예약
 
 10.20.40.0/21 이후 미사용
+
+### NACL — 미적용
+
+1차 구축에서는 NACL을 생성하지 않는다. VPC 기본 NACL(전체 허용)을 그대로 사용한다.
+
+- NACL은 Stateless이므로 응답용 임시 포트(1024-65535)를 반대 방향에 함께 허용해야 한다.
+  규칙이 두 배로 늘고 하나만 누락돼도 통신이 끊기는데 원인 추적이 어렵다.
+- 서브넷 단위 통제라 인스턴스별 구분이 불가능하다. 세밀한 통제는 SG가 담당한다.
+- Private-Data는 인터넷 기본 경로가 없어 실질적 노출 위험이 없다.
+
+스캔 단계에서 "기본 NACL이 전체 허용" finding이 예상되며,
+조치 시 Private-Data 계층에만 NACL을 생성한다. (T2)
+
+| Subnet | Inbound | Outbound |
+| --- | --- | --- |
+| Private-Data | 5432 from Private-App 대역 | 1024-65535 to Private-App 대역 |
