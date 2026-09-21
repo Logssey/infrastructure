@@ -194,3 +194,15 @@ resource "aws_vpc_security_group_egress_rule" "allow_all" {
   ip_protocol       = "-1"
   description       = "Allow all outbound"
 }
+
+# ── 6-b. etcd → etcd (client) ──
+# etcdctl 을 etcd 노드에서 실행할 때 다른 멤버의 2379 로 접속한다.
+# Kubespray 의 endpoint health --cluster 체크가 이 경로를 사용한다.
+resource "aws_vpc_security_group_ingress_rule" "etcd_client_internal" {
+  security_group_id            = aws_security_group.etcd.id
+  referenced_security_group_id = aws_security_group.etcd.id
+  ip_protocol                  = "tcp"
+  from_port                    = 2379
+  to_port                      = 2379
+  description                  = "etcd client between members"
+}
