@@ -16,3 +16,11 @@ module "network" {
   private_etcd_subnet_cidrs = var.private_etcd_subnet_cidrs
   private_data_subnet_cidrs = var.private_data_subnet_cidrs
 }
+
+module "security" {
+  source = "../../modules/security"
+
+  name_prefix   = local.name_prefix
+  vpc_id        = module.network.vpc_id
+  security_mode = var.security_mode
+}
