@@ -24,3 +24,11 @@ module "security" {
   vpc_id        = module.network.vpc_id
   security_mode = var.security_mode
 }
+
+module "iam" {
+  source = "../../modules/iam"
+
+  name_prefix    = local.name_prefix
+  security_mode  = var.security_mode
+  tfstate_bucket = var.tfstate_bucket
+}

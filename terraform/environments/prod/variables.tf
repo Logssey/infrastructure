@@ -96,3 +96,9 @@ variable "security_mode" {
     error_message = "security_mode는 permissive 또는 strict 여야 한다."
   }
 }
+
+variable "tfstate_bucket" {
+  description = "Terraform 상태 파일 버킷. 노드 Role 의 접근을 차단하는 데 사용한다."
+  type        = string
+  default     = "logssey-prod-s3-tfstate"
+}
