@@ -52,11 +52,15 @@ SG 규칙 단위 태그는 provider 5.x에서 도입된 기능이며 `descriptio
 | 3 | sg-worker | sg-internal-nlb | TCP 6443 | kubelet → apiserver |
 | 3-b | sg-control-plane | sg-internal-nlb | TCP 6443 | control plane → apiserver |
 | 4 | sg-internal-nlb | sg-control-plane | TCP 6443 | apiserver |
+| 4-b | sg-worker | sg-control-plane | TCP 6443 | apiserver 직접 (kube-proxy replacement) |
+| 4-c | sg-control-plane | sg-control-plane | TCP 6443 | apiserver 직접 (CP 간) |
 | 5 | sg-control-plane | sg-etcd | TCP 2379 | etcd client |
 | 6 | sg-etcd | sg-etcd | TCP 2380 | etcd peer (Raft) |
+| 6-b | sg-etcd | sg-etcd | TCP 2379 | etcd client between members |
 | 7 | sg-control-plane | sg-worker | TCP 10250 | kubelet API |
 | 8 | sg-k8s-node | sg-k8s-node | UDP 8472 | Cilium VXLAN 터널 |
 | 9 | sg-k8s-node | sg-k8s-node | TCP 4240 | Cilium agent health check |
+| 9-b | sg-k8s-node | sg-k8s-node | ICMP | Cilium health 노드 프로브 |
 | 10 | sg-k8s-node | sg-k8s-node | TCP 4244 | Hubble peer |
 | 11 | sg-worker | sg-worker | TCP 4245 | Hubble Relay |
 | 12 | sg-k8s-node | sg-k8s-node | TCP 22 | Ansible SSH (Kubespray) |
@@ -66,6 +70,20 @@ SG 규칙 단위 태그는 provider 5.x에서 도입된 기능이며 `descriptio
 - Management EC2를 두지 않으므로 `Management SG` 관련 규칙은 제외한다.
   kubectl은 Worker에, Kubespray는 Control Plane 1번 노드에 SSM으로 접속해 실행한다.
 - 12번 SSH 규칙은 구축 완료 후 제거를 검토한다. 노드 간 횡방향 이동 경로가 된다.
+
+### 구축 중 추가한 규칙
+
+설계 시 정의한 통신 경로가 실제 도구의 동작과 달라 구축 중 추가한 항목이다.
+상세는 [troubleshooting](troubleshooting/) 참조.
+
+| # | 추가 사유 | 문서 |
+| --- | --- | --- |
+| 6-b | Kubespray의 `etcdctl endpoint health --cluster` 체크가 etcd 노드에서 다른 멤버의 클라이언트 포트로 접속한다. peer 포트(2380)는 Raft 전용이라 이 경로를 대체하지 않는다. | [02](troubleshooting/02-etcd-client-sg.md) |
+| 4-b, 4-c | Cilium kube-proxy replacement 사용 시 eBPF가 Service IP를 백엔드(CP 노드의 6443)로 직접 변환한다. Internal NLB를 거치지 않으므로 직접 경로가 필요하다. | [05](troubleshooting/05-apiserver-sg-kpr.md) |
+| 9-b | `cilium-health`의 노드 간 프로브가 ICMP를 사용한다. 없으면 `Cluster health`가 1/N reachable로 표시되어 다른 문제 진단 시 혼선을 준다. | [05](troubleshooting/05-apiserver-sg-kpr.md) |
+
+**4-b와 4-c는 CNI 설정에 따라 필요 여부가 달라진다.**
+kube-proxy replacement를 끄면 트래픽이 Internal NLB를 경유하므로 불필요하다.
 
 ## permissive 추가 규칙 (strict에서 제거)
 
@@ -104,7 +122,6 @@ Overlay CNI 구성에서 Pod가 VPC 외부로 나갈 때 출발지 IP가 노드 
 **NetworkPolicy가 없으면 워커의 모든 Pod가 RDS와 Redis에 접근할 수 있다.**
 SG는 계층 경계만 담당하고 실질적 통제는 Cilium NetworkPolicy가 수행한다.
 
-
 ## 확인
 
 제거 대상 규칙 조회
@@ -127,3 +144,14 @@ aws ec2 describe-security-group-rules \
   --output table
 ```
 
+포트 차단 여부 판별
+
+```bash
+timeout 3 bash -c 'echo > /dev/tcp/<IP>/<PORT>'; echo exit=$?
+```
+
+| 결과 | 의미 |
+| --- | --- |
+| `exit=0` | 정상 연결 |
+| `Connection refused` (exit=1) | 포트 도달, 프로세스 없음 |
+| `exit=124` | timeout — SG 차단 |
