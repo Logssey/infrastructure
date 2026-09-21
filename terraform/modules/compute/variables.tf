@@ -109,3 +109,29 @@ variable "worker_private_ips" {
 variable "redis_private_ip" {
   type = string
 }
+
+# ── IMDS ──
+
+variable "imds_tokens" {
+  description = <<-EOT
+    optional : IMDSv1 허용. 1차 구축 기본값
+    required : IMDSv2 강제. T2 조치 항목
+    인스턴스 재시작 없이 변경 가능하다.
+  EOT
+  type        = string
+  default     = "optional"
+
+  validation {
+    condition     = contains(["optional", "required"], var.imds_tokens)
+    error_message = "imds_tokens 는 optional 또는 required 여야 한다."
+  }
+}
+
+variable "imds_hop_limit" {
+  description = <<-EOT
+    IMDS 응답의 최대 홉 수.
+    1로 설정하면 컨테이너에서 IMDS 에 도달하지 못한다. (T2 조치 항목)
+  EOT
+  type        = number
+  default     = 2
+}
