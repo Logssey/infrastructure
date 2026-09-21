@@ -30,3 +30,21 @@ output "route53_name_servers" {
   description = "도메인 등록기관에 입력할 NS 레코드"
   value       = module.edge.name_servers
 }
+
+output "internal_api_dns_name" {
+  description = "Kubespray inventory 의 loadbalancer_apiserver"
+  value       = module.lb.internal_api_dns_name
+}
+
+output "public_nlb_dns_name" {
+  description = "CloudFront Origin 대상"
+  value       = module.lb.public_nlb_dns_name
+}
+
+output "internal_api_target_group_arn" {
+  value = module.lb.internal_api_target_group_arn
+}
+
+output "public_target_group_arn" {
+  value = module.lb.public_target_group_arn
+}
