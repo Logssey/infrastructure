@@ -47,3 +47,8 @@ output "nat_gateway_public_ip" {
   description = "NAT Gateway 퍼블릭 IP. 외부 서비스 IP 허용목록 등록에 사용한다."
   value       = aws_eip.nat.public_ip
 }
+
+output "s3_vpc_endpoint_id" {
+  description = "S3 Gateway Endpoint ID"
+  value       = aws_vpc_endpoint.s3.id
+}

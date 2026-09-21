@@ -32,3 +32,8 @@ variable "private_data_subnet_cidrs" {
   description = "Private-Data Subnet CIDR"
   type        = list(string)
 }
+
+variable "region" {
+  description = "AWS 리전. VPC Endpoint service_name 조립에 사용한다."
+  type        = string
+}
