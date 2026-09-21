@@ -144,3 +144,17 @@ aws elbv2 describe-target-group-attributes \
   --query "Attributes[?Key=='preserve_client_ip'].[Key,Value]" \
   --output table
 ```
+
+## 생성 결과 (2026-09-21)
+
+| NLB | DNS 이름 |
+| --- | --- |
+| Internal API | logssey-prod-nlb-internal-api-5201b55cdbb1d44e.elb.ap-northeast-1.amazonaws.com |
+| Public | logssey-prod-nlb-public-a37c39e077808af2.elb.ap-northeast-1.amazonaws.com |
+
+Internal API DNS는 Kubespray inventory의 `loadbalancer_apiserver.address`에 지정한다.
+
+```bash
+terraform output internal_api_dns_name
+terraform output public_nlb_dns_name
+```
