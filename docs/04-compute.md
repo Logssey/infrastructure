@@ -168,3 +168,45 @@ aws ssm describe-instance-information \
   --query 'InstanceInformationList[].[InstanceId,PingStatus,PlatformName]' \
   --output table
 ```
+## 구축 중 발생한 이슈 (2026-09-21)
+
+신규 AWS 계정에서 첫 EC2 생성 시 두 에러가 발생했다.
+
+| 에러 | 원인 |
+| --- | --- |
+| PendingVerification | 계정 검증 대기. 리전별 첫 EC2 요청 시 발생 |
+| VcpuLimitExceeded (한도 5) | 검증 대기 중 임시 한도 적용 |
+
+검증 완료 후 vCPU 한도가 32로 자동 복구되어 재시도만으로 해결했다.
+별도 Service Quotas 상향 요청은 불필요했다.
+
+노드 10대 합계 20 vCPU. Quota code `L-1216C47A`.
+
+```bash
+aws service-quotas get-service-quota \
+  --service-code ec2 --quota-code L-1216C47A \
+  --region ap-northeast-1 --query 'Quota.Value' --output text
+```
+
+## SSM 접속
+
+접속
+
+```bash
+CP_A=$(aws ec2 describe-instances \
+  --filters "Name=tag:Name,Values=logssey-prod-cp-a" "Name=instance-state-name,Values=running" \
+  --region ap-northeast-1 \
+  --query 'Reservations[0].Instances[0].InstanceId' --output text)
+
+aws ssm start-session --target $CP_A --region ap-northeast-1
+```
+
+user_data 실행 검증
+
+```bash
+ls -l /var/log/logssey-init-done      # 완료 표식
+swapon --show                          # 출력 없어야 함
+lsmod | grep -E 'overlay|br_netfilter'
+sysctl net.bridge.bridge-nf-call-iptables net.ipv4.ip_forward
+cloud-init status --long               # status: done
+```
