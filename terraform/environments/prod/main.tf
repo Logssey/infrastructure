@@ -61,3 +61,19 @@ module "edge" {
   name_prefix = local.name_prefix
   domain_name = var.domain_name
 }
+
+module "lb" {
+  source = "../../modules/lb"
+
+  name_prefix = local.name_prefix
+  vpc_id      = module.network.vpc_id
+
+  private_app_subnet_ids = module.network.private_app_subnet_ids
+  public_subnet_ids      = module.network.public_subnet_ids
+
+  internal_nlb_sg_id = module.security.internal_nlb_sg_id
+  public_nlb_sg_id   = module.security.public_nlb_sg_id
+
+  control_plane_instance_ids = module.compute.control_plane_instance_ids
+  worker_instance_ids        = module.compute.worker_instance_ids
+}
