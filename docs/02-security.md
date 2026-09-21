@@ -54,6 +54,7 @@ SG 규칙 단위 태그는 provider 5.x에서 도입된 기능이며 `descriptio
 | 4 | sg-internal-nlb | sg-control-plane | TCP 6443 | apiserver |
 | 5 | sg-control-plane | sg-etcd | TCP 2379 | etcd client |
 | 6 | sg-etcd | sg-etcd | TCP 2380 | etcd peer (Raft) |
+| 6-b | sg-etcd | sg-etcd | TCP 2379 | etcd client between members |
 | 7 | sg-control-plane | sg-worker | TCP 10250 | kubelet API |
 | 8 | sg-k8s-node | sg-k8s-node | UDP 8472 | Cilium VXLAN 터널 |
 | 9 | sg-k8s-node | sg-k8s-node | TCP 4240 | Cilium agent health check |
@@ -66,6 +67,9 @@ SG 규칙 단위 태그는 provider 5.x에서 도입된 기능이며 `descriptio
 - Management EC2를 두지 않으므로 `Management SG` 관련 규칙은 제외한다.
   kubectl은 Worker에, Kubespray는 Control Plane 1번 노드에 SSM으로 접속해 실행한다.
 - 12번 SSH 규칙은 구축 완료 후 제거를 검토한다. 노드 간 횡방향 이동 경로가 된다.
+- 6-b는 구축 중 발견한 누락 규칙이다. 설계 시 "Control Plane에서만 2379 접근"으로
+  정의했으나, Kubespray의 `etcdctl endpoint health --cluster` 체크가 etcd 노드에서
+  다른 멤버의 클라이언트 포트로 접속하므로 멤버 간 2379 통신이 필요하다.
 
 ## permissive 추가 규칙 (strict에서 제거)
 
