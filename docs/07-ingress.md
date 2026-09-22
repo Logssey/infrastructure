@@ -13,7 +13,7 @@ Public NLB                         Terraform 관리
    ↓ TCP 30080
 Worker NodePort                    Envoy Gateway Service
    ↓
-Envoy Proxy                        Gateway API 구현체
+Envoy Proxy                        Worker 3대에 각 1 Pod
    ↓ HTTPRoute
 Backend Service                    api / websocket / frontend
 ```
@@ -32,13 +32,15 @@ Backend Service                    api / websocket / frontend
 | --- | --- |
 | Envoy Gateway | v1.9.1 |
 | Gateway API | v1.6.1 (Envoy Gateway 번들) |
+| Envoy Proxy | v1.39.1 |
 | Kubernetes | 1.35.4 |
 
 Gateway API 는 최근 5개 Kubernetes 마이너 버전을 지원하며 v1.1 이후
 Kubernetes 1.26 이상을 요구한다. 본 환경은 지원 범위 내에 있다.
 
 Envoy Gateway 차트가 호환되는 Gateway API CRD 를 함께 설치하므로
-버전 조합이 검증된 상태로 유지된다.
+버전 조합이 검증된 상태로 유지된다. Kubespray 의 `gateway_api_enabled` 는
+`false` 로 두어 CRD 관리 주체를 하나로 유지한다.
 
 ### Gateway API v1.6 변경 사항
 
@@ -67,6 +69,22 @@ Gateway API 는 역할 분리가 명확하다.
 Ingress 는 어노테이션으로 구현체별 기능을 확장해 이식성이 낮았으나,
 Gateway API 는 표준 필드로 대부분을 표현한다.
 
+## 컨트롤플레인과 데이터플레인
+
+Envoy Gateway 는 두 계층으로 나뉜다.
+
+| 계층 | Deployment | 역할 |
+| --- | --- | --- |
+| 컨트롤플레인 | `envoy-gateway` | Gateway·HTTPRoute 를 감시해 Envoy 설정 생성 |
+| 데이터플레인 | `envoy-envoy-gateway-system-eg-*` | 실제 트래픽 처리 |
+
+데이터플레인 Deployment 는 Gateway 생성 시 컨트롤플레인이 만든다.
+직접 정의하지 않고 `EnvoyProxy` CRD 로 설정한다.
+
+**컨트롤플레인이 중단되어도 기존 Envoy 는 계속 동작한다.**
+다만 Gateway 나 HTTPRoute 변경이 반영되지 않는다.
+설정 변경이 막히는 상황을 피하기 위해 replica 2 로 운영한다.
+
 ## NodePort 30080 고정
 
 ### 왜 고정하는가
@@ -84,33 +102,50 @@ Terraform 을 수정해야 한다. Gateway 를 재생성할 때마다 포트가 
 
 ### 고정 방법
 
-`EnvoyProxy` CRD 로 Envoy Gateway 가 생성하는 Service 를 커스터마이즈한다.
-`GatewayClass` 또는 `Gateway` 의 `parametersRef` 로 연결한다.
+`EnvoyProxy` CRD 로 Envoy Gateway 가 생성하는 Service 를 커스터마이즈하고,
+`GatewayClass` 의 `parametersRef` 로 연결한다.
 
 ```yaml
-apiVersion: gateway.envoyproxy.io/v1alpha1
-kind: EnvoyProxy
-spec:
-  provider:
-    type: Kubernetes
-    kubernetes:
-      envoyService:
-        type: NodePort
-        patch:
-          type: StrategicMerge
-          value:
-            spec:
-              ports:
-                - name: <포트 이름>
-                  nodePort: 30080
+envoyService:
+  type: NodePort
+  externalTrafficPolicy: Cluster
+  patch:
+    type: StrategicMerge
+    value:
+      spec:
+        ports:
+          - port: 80
+            name: http-80
+            nodePort: 30080
 ```
 
 **`EnvoyProxy` 는 Gateway 보다 먼저 생성한다.** 나중에 연결하면
 Service 가 재생성되며 일시적으로 트래픽이 끊긴다.
 
-패치의 포트 이름은 Envoy Gateway 가 생성하는 Service 의 실제 이름과
-일치해야 한다. 이름이 어긋나면 패치가 조용히 무시되므로,
-Gateway 생성 후 Service 를 확인하고 값을 채운다.
+패치 작성 시 주의할 점이 두 가지다.
+상세는 [troubleshooting/08](troubleshooting/08-envoy-gateway-nodeport.md) 참조.
+
+| 항목 | 내용 |
+| --- | --- |
+| 병합 키 | Service.ports 의 StrategicMerge 병합 키는 `port` 다. `name` 만 지정하면 인프라 생성이 실패한다 |
+| 포트 이름 | 리스너 이름이 아니라 `http-<port>` 형식이다 |
+
+### externalTrafficPolicy
+
+기본값 `Local` 은 Envoy Pod 가 있는 노드만 응답한다.
+Pod 가 3개 미만이거나 롤링 업데이트 중이면 NLB 타겟 일부가 unhealthy 로 빠진다.
+
+`Cluster` 로 변경했다.
+
+| 값 | 동작 | 클라이언트 IP |
+| --- | --- | --- |
+| Local | Pod 가 있는 노드만 응답 | 보존 |
+| **Cluster** | 모든 노드가 응답, 필요 시 전달 | 보존 안 됨 |
+
+Public NLB 의 Client IP Preservation 을 이미 비활성화했고 실제 클라이언트
+IP 는 CloudFront 의 `X-Forwarded-For` 로 받으므로 `Local` 을 유지할 이유가 없다.
+
+`Cluster` 는 롤링 업데이트 중에도 NLB 타겟 3대가 healthy 를 유지한다.
 
 ### 대안 — AWS Load Balancer Controller
 
@@ -126,11 +161,15 @@ EKS 에서 일반적인 방식이다.
 
 **채택하지 않았다.**
 
-Public NLB 를 이미 Terraform 으로 구축하고 검증했다. 
+Public NLB 를 이미 Terraform 으로 구축하고 검증했다. 컨트롤러 방식으로
+전환하면 스프린트 3의 CloudFront 연결까지 영향을 받는다.
 
 그리고 인프라 리소스를 Terraform 이 소유한다는 원칙이 설계 전반에 일관된다.
 컨트롤러가 LB 를 만들면 Terraform 상태 밖의 AWS 리소스가 생겨
 관리 주체가 둘로 나뉜다.
+
+본 환경에서 `type: LoadBalancer` 를 쓰면 EXTERNAL-IP 가 `<pending>` 에 머물고
+Gateway 가 `PROGRAMMED: False` 상태로 남는다.
 
 ## Path 기반 라우팅
 
@@ -146,8 +185,12 @@ Public NLB 를 이미 Terraform 으로 구축하고 검증했다.
 
 단일 도메인이므로 CORS 설정이 불필요하고 Refresh Token 쿠키 처리가 단순해진다.
 
-HTTPRoute 는 애플리케이션 배포 시점에 정의한다. 1차 구축에서는
-테스트용 백엔드로 경로가 동작하는지만 확인한다.
+HTTPRoute 는 애플리케이션 배포 시점에 정의한다.
+
+**`PathPrefix` 매칭은 경로를 그대로 백엔드에 전달한다.**
+`/api/users` 요청은 백엔드에 `/api/users` 로 도착한다.
+백엔드가 접두사를 포함한 경로로 라우팅하거나, `URLRewrite` 필터로
+접두사를 제거해야 한다. 백엔드 구현에 맞춰 결정한다.
 
 ## TLS 종단
 
@@ -160,26 +203,43 @@ HTTPRoute 는 애플리케이션 배포 시점에 정의한다. 1차 구축에�
 Envoy Gateway 는 TLS 를 종단하지 않는다. 클러스터 내부 구간이며
 NLB 가 이미 복호화한 트래픽을 받는다.
 
-CloudFront 가 전달하는 `X-Forwarded-For` 로 실제 클라이언트 IP 를 식별한다.
-Public NLB 의 Client IP Preservation 이 비활성이므로
-Envoy 가 보는 출발지 IP 는 NLB 주소다.
+webhook 통신용 인증서는 Helm 차트의 certgen Job 이 자체 생성한다.
+**cert-manager 가 필요하지 않다.**
 
-## Client IP Preservation 과의 관계
+## 클라이언트 IP 식별
 
-`docs/05-loadbalancer.md` 에 기록한 대로 Public NLB 는
-Client IP Preservation 을 비활성화했다.
-
+Public NLB 는 Client IP Preservation 을 비활성화했다
+(`docs/05-loadbalancer.md` 참조).
 활성 상태에서는 Worker Node 가 보는 출발지가 CloudFront IP 가 되어
 `sg-public-nlb → sg-worker` SG 참조 규칙이 동작하지 않는다.
 
-Envoy Gateway 에서 실제 클라이언트 IP 가 필요하면
-`ClientTrafficPolicy` 로 XFF 신뢰 홉 수를 설정한다.
+따라서 Envoy 가 보는 출발지 IP 는 NLB 주소이며,
+실제 클라이언트 IP 는 CloudFront 가 전달하는 `X-Forwarded-For` 로 식별한다.
+
+Envoy 는 기본적으로 XFF 헤더를 처리하고 접근 로그에 기록한다.
+신뢰할 홉 수를 조정하려면 `ClientTrafficPolicy` 를 사용한다.
+CloudFront 연결 후 실제 헤더 값을 보고 설정한다.
+
+## 구축 결과
+
+| 항목 | 상태 |
+| --- | --- |
+| 컨트롤플레인 | 2 Pod (worker-a, worker-c) |
+| 데이터플레인 | 3 Pod (worker 3대 분산) |
+| GatewayClass | Accepted |
+| Gateway | Programmed |
+| NodePort | 30080 고정 |
+| NLB 타겟 | Worker 3대 healthy |
+
+라우트가 없는 상태에서 노드 3대 모두 404 를 응답한다.
+Envoy 가 요청을 받았으나 매칭되는 HTTPRoute 가 없다는 뜻이며 정상이다.
 
 ## 미결정 사항
 
 | 항목 | 결정 시점 |
 | --- | --- |
 | HTTPRoute 세부 정의 | 애플리케이션 배포 시 |
+| `PathPrefix` 접두사 처리 방식 | 백엔드 구현 확정 후 |
 | `ClientTrafficPolicy` XFF 설정 | CloudFront 연결 후 |
 | Envoy Proxy 리소스 요청·제한 | 부하 테스트 후 |
 | 다중 Gateway 여부 | 현재 단일 Gateway |
