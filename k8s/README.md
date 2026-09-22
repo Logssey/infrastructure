@@ -82,8 +82,12 @@ VPC IP 대역으로 승인 범위를 제한한다.
 
 ```bash
 kubectl get csr
-# 노드 6대 Approved,Issued
+```
 
+`cluster.yml` 실행 직후에는 노드 6대의 CSR 이 `Approved,Issued` 로 보인다.
+CSR 리소스는 약 1시간 뒤 garbage collector 가 정리하므로 이후에는 빈 목록이 정상이다.
+
+```bash
 ansible -i <inventory> cp-a -m shell -b \
   -a "openssl x509 -in /var/lib/kubelet/pki/kubelet-server-current.pem \
       -noout -issuer -ext subjectAltName"
@@ -91,7 +95,7 @@ ansible -i <inventory> cp-a -m shell -b \
 # DNS:cp-a, IP Address:10.20.10.10
 ```
 
-상세는 `kubespray/README.md` 참조.
+상세는 `kubespray/README.md` 와 `docs/06-kubespray.md` 참조.
 
 ### 전제 조건 — Security Group
 
@@ -319,11 +323,13 @@ for ip in 10.20.10.20 10.20.11.20 10.20.12.20; do
 done
 ```
 
-NLB 타겟 상태.
+NLB 타겟 상태. Terraform 디렉터리에서 실행한다.
 
 ```bash
+cd terraform/environments/prod
+
 aws elbv2 describe-target-health \
-  --target-group-arn <ENVOY_TG_ARN> \
+  --target-group-arn $(terraform output -raw public_target_group_arn) \
   --region ap-northeast-1 \
   --query 'TargetHealthDescriptions[].[Target.Id,TargetHealth.State]' \
   --output table

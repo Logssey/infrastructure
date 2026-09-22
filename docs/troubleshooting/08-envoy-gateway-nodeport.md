@@ -264,7 +264,7 @@ kubectl -n envoy-gateway-system logs -l control-plane=envoy-gateway --tail=30 \
 
 두 값이 같으면 롤링 업데이트의 서지 Pod 가 배치될 자리가 없다.
 `maxSurge: 0` 으로 두거나 `ScheduleAnyway` 를 쓴다.
-metrics-server 는 replica 2, 노드 3 이므로 여유가 있어 `DoNotSchedule` 로 두었다.
+metrics-server 와 Envoy Gateway 컨트롤플레인은 replica 2, 노드 3 이므로 여유가 있어 `DoNotSchedule` 로 두었다.
 
 ## 참고
 
