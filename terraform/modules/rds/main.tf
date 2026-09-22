@@ -29,23 +29,18 @@ resource "aws_db_parameter_group" "this" {
   name   = "${var.name_prefix}-pg${split(".", var.engine_version)[0]}"
   family = var.parameter_group_family
 
-  # 전송 구간 암호화 강제.
+  # 전송 구간 암호화(rds.force_ssl)는 파라미터를 지정하지 않는다.
   #
-  # 기본값 0 에서는 SSL 없는 연결이 성립해 애플리케이션이
-  # 평문으로 통신해도 문제를 인지하지 못한다.
-  # 1 이면 SSL 을 사용하지 않는 연결이 거부된다.
+  # PostgreSQL 18 + RDS 조합에서 이 값은 Source=system, 기본값 1 이다.
+  # 명시하면 AWS 가 기본값과 같다고 판단해 사용자 설정으로 저장하지 않고,
+  # Terraform 은 매 plan 마다 다시 설정하려 시도해 diff 가 반복된다.
   #
-  # dynamic 파라미터이므로 재부팅 없이 적용된다.
-  parameter {
-    name  = "rds.force_ssl"
-    value = "1"
-  }
-
-  # 로그 관련 파라미터는 기본값을 유지한다.
-  #   log_statement = none
-  #   log_min_duration_statement = -1
-  # 대부분 dynamic 이므로 백엔드의 쿼리 패턴이 확정된 뒤
-  # 무중단으로 조정할 수 있다.
+  # 확인:
+  #   aws rds describe-db-parameters --db-parameter-group-name <name> \
+  #     --query "Parameters[?ParameterName=='rds.force_ssl'].[ParameterValue,Source]"
+  #
+  # 그룹 자체는 유지한다. 기본 그룹(default.postgres18)은 수정할 수 없으므로
+  # 향후 파라미터 추가를 위해 커스텀 그룹을 미리 붙여둔다.
 
   tags = {
     Name = "${var.name_prefix}-pg${split(".", var.engine_version)[0]}"

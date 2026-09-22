@@ -131,11 +131,29 @@ RDS 가 외부로 나가는 경로도, 외부에서 도달하는 경로도 존�
 
 ### 전송 암호화 — rds.force_ssl
 
-파라미터 그룹에 `rds.force_ssl = 1` 을 설정한다.
+`rds.force_ssl = 1` 이면 **SSL 을 사용하지 않는 연결이 거부된다.**
 
-이 값이 1 이면 **SSL 을 사용하지 않는 연결이 거부된다.**
-기본값 0 에서는 평문 연결이 가능하며, 애플리케이션이 SSL 을 쓰지 않아도
-연결이 성립해 문제를 인지하지 못한다.
+**PostgreSQL 18 + RDS 조합에서는 이 값이 시스템 기본값으로 1 이다.**
+따라서 파라미터 그룹에 별도로 지정하지 않는다.
+
+```bash
+aws rds describe-db-parameters \
+  --db-parameter-group-name logssey-prod-pg18 \
+  --region ap-northeast-1 \
+  --query "Parameters[?ParameterName=='rds.force_ssl'].[ParameterValue,Source,ApplyType]" \
+  --output table
+```
+
+`Source` 가 `system` 으로 나오면 AWS 가 기본값으로 설정한 것이다.
+
+Terraform 에 명시하면 문제가 생긴다.
+AWS 가 기본값과 같다고 판단해 사용자 설정으로 저장하지 않고,
+Terraform 은 다음 plan 에서 설정이 없다고 보아 다시 시도한다.
+결과적으로 **매 plan 마다 동일한 diff 가 반복된다.**
+
+**엔진 버전을 낮추면 확인이 필요하다.**
+기본값은 버전에 따라 다르며 이전 버전은 0 이었다.
+그 경우 파라미터 그룹에 명시해야 한다.
 
 애플리케이션은 JDBC URL 에 SSL 옵션을 명시해야 한다.
 
@@ -168,7 +186,7 @@ AWS 보안 백서도 자격증명을 코드나 설정 파일에 평문으로 두
 시크릿 ARN 은 아래로 참조한다.
 
 ```hcl
-aws_db_instance.main.master_user_secret[0].secret_arn
+aws_db_instance.this.master_user_secret[0].secret_arn
 ```
 
 `password` 와 `manage_master_user_password` 는 상호 배타적이다.
@@ -256,11 +274,8 @@ aws rds create-db-snapshot \
 나중에 커스텀으로 교체하려면 인스턴스 수정과 재부팅이 필요하므로,
 처음부터 커스텀 그룹을 붙여 이후 변경을 자유롭게 한다.
 
-| 파라미터 | 값 | 유형 |
-| --- | --- | --- |
-| `rds.force_ssl` | 1 | dynamic (재부팅 불필요) |
-
-**나머지는 기본값을 유지한다.**
+**현재 명시한 파라미터는 없다.**
+`rds.force_ssl` 은 시스템 기본값이 1 이므로 지정하지 않는다(위 보안 절 참조).
 
 로그 관련 파라미터는 백엔드의 쿼리 패턴이 확정된 뒤 조정한다.
 기본값이 이미 보수적이라 CloudWatch 비용 문제도 없다.
@@ -278,6 +293,19 @@ aws rds create-db-snapshot \
 | static | 재부팅 필요 | `max_connections`, `shared_buffers` |
 
 로그 관련은 대부분 dynamic 이라 나중에 무중단으로 조정할 수 있다.
+
+### Source 값의 의미
+
+`describe-db-parameters` 는 파라미터마다 `Source` 를 함께 반환한다.
+
+| Source | 의미 |
+| --- | --- |
+| `engine-default` | PostgreSQL 엔진 기본값 |
+| `system` | AWS 가 RDS 환경에 맞춰 설정한 값 |
+| `user` | 파라미터 그룹에 명시한 값 |
+
+**Terraform 으로 관리하는 것은 `user` 뿐이다.**
+`system` 값을 코드에 같은 값으로 명시하면 저장되지 않고 diff 만 반복된다.
 
 ---
 
@@ -363,50 +391,40 @@ T4g 는 버스터블이므로 베이스라인을 초과해 지속 사용하면 �
 
 ```bash
 aws rds describe-db-instances \
-  --db-instance-identifier logssey-prod-rds \
+  --db-instance-identifier $(terraform output -raw rds_instance_id) \
   --region ap-northeast-1 \
   --query 'DBInstances[0].[DBInstanceStatus,Engine,EngineVersion,DBInstanceClass,MultiAZ,StorageEncrypted,PubliclyAccessible,DeletionProtection]' \
   --output table
 ```
 
+기대값.
+
+```
+available / postgres / 18.6 / db.t4g.small / False / True / False / True
+```
+
 엔드포인트
 
 ```bash
-aws rds describe-db-instances \
-  --db-instance-identifier logssey-prod-rds \
-  --region ap-northeast-1 \
-  --query 'DBInstances[0].Endpoint.[Address,Port]' \
-  --output text
+terraform output rds_endpoint
+terraform output rds_address
 ```
 
-비밀번호 조회 — Secrets Manager
+비밀번호 조회
 
 ```bash
-SECRET_ARN=$(aws rds describe-db-instances \
-  --db-instance-identifier logssey-prod-rds \
-  --region ap-northeast-1 \
-  --query 'DBInstances[0].MasterUserSecret.SecretArn' --output text)
-
 aws secretsmanager get-secret-value \
-  --secret-id $SECRET_ARN \
+  --secret-id $(terraform output -raw rds_master_user_secret_arn) \
   --region ap-northeast-1 \
   --query 'SecretString' --output text
 ```
 
-파라미터 확인
-
-```bash
-aws rds describe-db-parameters \
-  --db-parameter-group-name logssey-prod-pg18 \
-  --region ap-northeast-1 \
-  --query "Parameters[?ParameterName=='rds.force_ssl'].[ParameterName,ParameterValue,ApplyType]" \
-  --output table
-```
-
-연결 테스트 — Worker Pod 에서
+### 연결 테스트
 
 비밀번호에 URL 예약 문자가 포함될 수 있으므로 연결 문자열 대신
 `PGPASSWORD` 환경변수와 개별 인자를 사용한다.
+
+Control Plane 노드에서 실행한다.
 
 ```bash
 kubectl run pgtest --restart=Never \
@@ -415,30 +433,48 @@ kubectl run pgtest --restart=Never \
   -- psql -h <endpoint> -U logssey_admin -d reused \
   -c "SELECT ssl, version, cipher FROM pg_stat_ssl WHERE pid = pg_backend_pid();"
 
+kubectl get pod pgtest
 kubectl logs pgtest
 kubectl delete pod pgtest
 ```
 
-정상이면 아래와 같이 나온다.   
+`--rm -it` 조합은 출력이 잘리는 경우가 있어 Pod 를 남기고 로그를 조회한다.
 
-ssl | version | cipher
-| --- | --- | --- |
-t | TLSv1.3 | TLS_AES_256_GCM_SHA384
+정상이면 아래와 같이 나온다.
 
-
-SSL 강제가 동작하는지 확인하려면 `PGSSLMODE=disable` 로 시도한다.
-```bash
-FATAL: no pg_hba.conf entry for host "10.20.12.20", user "logssey_admin",
-database "reused", no encryption
+```
+ ssl | version |         cipher
+-----+---------+------------------------
+ t   | TLSv1.3 | TLS_AES_256_GCM_SHA384
 ```
 
+### SSL 강제 확인
 
-거부 사유가 `no encryption` 이면 `rds.force_ssl` 이 동작하는 것이다.
+`PGSSLMODE=disable` 로 접속을 시도한다.
+
+```bash
+kubectl run pgtest-nossl --restart=Never \
+  --image=postgres:18-alpine \
+  --env="PGPASSWORD=<password>" \
+  --env="PGSSLMODE=disable" \
+  -- psql -h <endpoint> -U logssey_admin -d reused -c "SELECT 1;"
+
+kubectl logs pgtest-nossl
+kubectl delete pod pgtest-nossl
+```
+
+거부되어야 한다.
+
+```
+FATAL: no pg_hba.conf entry for host "10.20.12.20", user "logssey_admin",
+       database "reused", no encryption
+```
+
+거부 사유가 `no encryption` 이면 SSL 강제가 동작하는 것이다.
 
 출발지가 노드 IP(`10.20.12.20`)로 기록되는 것은 Overlay CNI 에서
-Pod 트래픽이 노드 ENI 로 SNAT 되기 때문이다. `docs/02-security.md` 의
-"알려진 한계" 참조.
-
+Pod 트래픽이 노드 ENI 로 SNAT 되기 때문이다.
+`docs/02-security.md` 의 "알려진 한계" 참조.
 
 ---
 
