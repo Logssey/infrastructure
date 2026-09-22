@@ -37,8 +37,8 @@ resource "aws_vpc_security_group_ingress_rule" "worker_from_public_nlb" {
   security_group_id            = aws_security_group.worker.id
   referenced_security_group_id = aws_security_group.public_nlb.id
   ip_protocol                  = "tcp"
-  from_port                    = 30080
-  to_port                      = 30080
+  from_port                    = var.envoy_node_port
+  to_port                      = var.envoy_node_port
   description                  = "Envoy Gateway NodePort"
 }
 

@@ -48,3 +48,29 @@ output "internal_api_target_group_arn" {
 output "public_target_group_arn" {
   value = module.lb.public_target_group_arn
 }
+
+output "control_plane_instance_ids" {
+  description = "SSM 접속 대상. aws ssm start-session --target <id>"
+  value       = module.compute.control_plane_instance_ids
+}
+
+output "worker_instance_ids" {
+  value = module.compute.worker_instance_ids
+}
+
+output "etcd_instance_ids" {
+  value = module.compute.etcd_instance_ids
+}
+
+output "redis_instance_id" {
+  value = module.compute.redis_instance_id
+}
+
+output "vpc_id" {
+  value = module.network.vpc_id
+}
+
+output "route53_zone_id" {
+  description = "Route53 레코드 추가 시 참조한다."
+  value       = module.edge.zone_id
+}
