@@ -1,7 +1,5 @@
 # 09. Redis
 
-> 설계 근거는 Notion [2. 데이터베이스] 참조
-
 ## 참고 문서
 
 | 항목 | 링크 |
@@ -53,7 +51,6 @@ Redis 는 그 기능들의 필요도가 낮아 관리형의 이점이 줄어든�
 **부수 효과** — EC2 는 OS 패키지 취약점과 설정 미비가 스캔 대상이 된다.
 관리형 서비스는 이 영역이 AWS 책임이라 스캔 재료가 제한적이다.
 
-
 ---
 
 ## 용도
@@ -86,10 +83,11 @@ Redis 는 그 기능들의 필요도가 낮아 관리형의 이점이 줄어든�
 | 조건 | 내용 |
 | --- | --- |
 | 논리 분리 | db 0 = 캐시, db 1 = 토큰 |
-| `maxmemory-policy` | `volatile-lru` — TTL 이 설정된 키만 evict 대상 |
-| `maxmemory` | 1gb — evict 가 발생하지 않을 여유 |
+| `maxmemory-policy` | `volatile-lru` |
+| `maxmemory` | 1gb |
 | 영속성 | AOF 활성 |
 
+상세는 아래 메모리 절 참조.
 
 ---
 
@@ -120,23 +118,7 @@ Redis 6 부터 ACL 을 지원한다. 본 환경은 7.0.15 이므로 사용 가�
 | `requirepass` | 단일 공유 비밀번호. 사용자 구분 없음 |
 | **ACL** | 사용자별 권한. 명령 카테고리 단위 제어 |
 
-ACL 구성.
-
-```
-user default off
-user app on ><password> ~* &* +@all -@dangerous -@admin
-```
-
-| 항목 | 의미 |
-| --- | --- |
-| `default off` | 기본 계정 비활성화 |
-| `~*` | 모든 키 패턴 접근 |
-| `&*` | 모든 pub/sub 채널 |
-| `+@all` | 모든 명령 허용 후 |
-| `-@dangerous` | FLUSHALL, FLUSHDB, KEYS, DEBUG 등 제외 |
-| `-@admin` | CONFIG, SHUTDOWN, REPLICAOF 등 제외 |
-
-**`rename-command` 대신 ACL 을 쓰는 이유.**
+**`rename-command` 대신 ACL 을 쓴다.**
 
 | 항목 | rename-command | ACL |
 | --- | --- | --- |
@@ -146,14 +128,80 @@ user app on ><password> ~* &* +@all -@dangerous -@admin
 
 Redis 7 문서는 명령 제한에 ACL 사용을 권장한다.
 
-**애플리케이션 연결 설정에 사용자명이 필요하다.**
+#### 별도 파일로 관리
 
-```yaml
-spring.data.redis.username: app
-spring.data.redis.password: ${REDIS_PASSWORD}
+`redis.conf` 에 ACL 을 직접 쓰지 않고 `aclfile` 로 분리한다.
+
+```
+aclfile /etc/redis/acl-users.conf
 ```
 
-`requirepass` 만 쓸 때와 달리 사용자명이 추가된다.
+| 이점 | 내용 |
+| --- | --- |
+| 비밀번호 분리 | `redis.conf` 에 비밀번호가 남지 않는다 |
+| 런타임 리로드 | `ACL LOAD` 로 재시작 없이 반영 |
+| 권한 관리 | ACL 파일만 640 으로 제한 |
+
+#### ACL 파일은 주석과 빈 줄을 허용하지 않는다
+
+**`redis.conf` 와 규칙이 다르다.** 모든 줄이 `user` 로 시작해야 한다.
+
+주석을 넣으면 기동이 실패한다.
+
+```
+# Aborting Redis startup because of ACL errors:
+# /etc/redis/acl-users.conf:1 should start with user keyword followed by the username.
+```
+
+설명은 `redis.conf` 의 `aclfile` 지시어 근처나 이 문서에 남긴다.
+
+#### 구성
+
+```
+user default off
+user app on ><password> ~* &* +@read +@write +@connection -@dangerous
+```
+
+| 항목 | 의미 |
+| --- | --- |
+| `default off` | 기본 계정 비활성화 |
+| `~*` | 모든 키 패턴 접근 |
+| `&*` | 모든 pub/sub 채널 |
+| `+@read +@write` | 데이터 조작 명령 |
+| `+@connection` | CLIENT SETNAME 등. 일부 클라이언트가 연결 시 사용 |
+| `-@dangerous` | FLUSHALL, FLUSHDB, KEYS, DEBUG 등 제외 |
+
+**권한 부여 방향이 중요하다.**
+
+| 방식 | 의미 |
+| --- | --- |
+| `+@all -@dangerous -@admin` | 전부 주고 위험한 것만 뺌 |
+| **`+@read +@write -@dangerous`** | 필요한 것만 줌 |
+
+최소 권한 원칙에 맞는 것은 후자다.
+
+`~*` 로 둔 것은 백엔드 키 네이밍이 확정되지 않았기 때문이다.
+확정되면 `~cache:* ~token:*` 식으로 좁힌다.
+
+#### INFO 는 부여하지 않는다
+
+`INFO` 는 `@admin` 카테고리에 속해 app 계정에서 실행할 수 없다.
+
+```
+NOPERM this user has no permissions to run the 'info' command
+```
+
+실무 표준은 **애플리케이션 계정과 모니터링 계정을 분리**하는 것이다.
+모니터링 도구를 도입할 때 전용 계정을 만든다.
+
+```
+user monitor on ><password> ~* +@read +info +dbsize +slowlog +latency +client|list -@write -@admin -@dangerous
+```
+
+Percona PMM 공식 문서도 같은 패턴을 안내한다.
+
+모니터링 도구가 없는 상태에서 계정만 만들면 관리 대상과
+비밀번호만 늘어나므로 지금은 생성하지 않는다.
 
 ### 비밀번호 관리
 
@@ -173,33 +221,16 @@ RDS 는 `manage_master_user_password` 로 AWS 가 Secrets Manager 에
 비밀번호를 생성·저장하나, Redis 는 EC2 에 직접 설치한 것이라
 AWS 가 관여하지 않는다. 방식이 다른 이유다.
 
-```bash
-# 비밀번호 생성 및 등록
-PASSWORD=$(openssl rand -base64 32)
-
-aws ssm put-parameter \
-  --name /logssey/prod/redis/password \
-  --value "$PASSWORD" \
-  --type SecureString \
-  --region ap-northeast-1
-```
-
-```bash
-# 조회
-aws ssm get-parameter \
-  --name /logssey/prod/redis/password \
-  --with-decryption \
-  --region ap-northeast-1 \
-  --query 'Parameter.Value' --output text
-```
+노드 IAM Role 의 `AmazonSSMManagedInstanceCore` 로
+SecureString 복호화까지 가능하다(확인됨).
 
 ### 파일 권한
 
-`redis.conf` 에는 ACL 비밀번호가 평문으로 들어간다.
+`acl-users.conf` 에는 비밀번호가 평문으로 들어간다.
 
 ```bash
-sudo chmod 640 /etc/redis/redis.conf
-sudo chown redis:redis /etc/redis/redis.conf
+chmod 640 /etc/redis/acl-users.conf
+chown redis:redis /etc/redis/acl-users.conf
 ```
 
 Redis 프로세스는 `redis` 사용자로 실행된다. 패키지 설치 시 자동 설정되며
@@ -276,21 +307,53 @@ RDB 스냅샷도 함께 유지한다. AOF 는 복구 시간이 길고,
 RDB 는 백업 파일로 다루기 쉽다. 두 방식을 병행하면
 빠른 복구와 정확한 복구를 모두 확보할 수 있다.
 
+Redis 7 부터 AOF 는 `appendonlydir/` 디렉터리에
+base 파일과 incr 파일로 나뉘어 저장된다.
+
+### 커널 파라미터 — vm.overcommit_memory
+
+```
+vm.overcommit_memory = 1
+```
+
+Redis 는 RDB 저장과 AOF 재작성에 `fork()` 를 사용한다.
+리눅스 기본 설정에서는 부모 프로세스만큼의 메모리가 필요하다고 판단해
+저메모리 상황에서 실패할 수 있다.
+
+설정하지 않으면 기동 시마다 경고가 남는다.
+
+```
+WARNING Memory overcommit must be enabled! Without it, a background save
+or replication may fail under low memory condition.
+```
+
+user_data 에 포함되어 있다.
+
 ---
 
 ## 설정 절차
 
-user_data 는 패키지 설치만 수행하고 **서비스를 중지·비활성 상태로 둔다.**
+user_data 는 패키지 설치와 커널 파라미터 설정만 수행하고
+**서비스를 중지·비활성 상태로 둔다.**
 기본 설정(`bind 127.0.0.1`, 인증 없음)으로 기동되는 것을 막기 위함이다.
 
+`terraform/modules/compute/templates/redis.sh` 참조.
+
+### 1. 비밀번호 생성 및 등록
+
+로컬에서 수행한다.
+
 ```bash
-systemctl stop redis-server
-systemctl disable redis-server
+PASSWORD=$(openssl rand -base64 32)
+
+aws ssm put-parameter \
+  --name /logssey/prod/redis/password \
+  --value "$PASSWORD" \
+  --type SecureString \
+  --region ap-northeast-1
 ```
 
-`docs/04-compute.md` 의 user_data 절 참조.
-
-### 1. 접속
+### 2. 노드 접속
 
 ```bash
 cd terraform/environments/prod
@@ -299,129 +362,157 @@ REDIS_ID=$(terraform output -raw redis_instance_id)
 aws ssm start-session --target $REDIS_ID --region ap-northeast-1
 ```
 
-### 2. 비밀번호 준비
-
-로컬에서 생성해 Parameter Store 에 등록한 뒤, 노드에서 조회한다.
-
 ```bash
 sudo su -
+```
+
+### 3. 비밀번호 조회
+
+```bash
 PASSWORD=$(aws ssm get-parameter \
   --name /logssey/prod/redis/password \
   --with-decryption --region ap-northeast-1 \
   --query 'Parameter.Value' --output text)
 ```
 
-노드 IAM Role 에 `ssm:GetParameter` 와 KMS 복호화 권한이 필요하다.
-`AmazonSSMManagedInstanceCore` 에 포함되어 있다.
+AWS CLI 는 user_data 에서 설치된다.
+**Ubuntu 24.04 저장소에는 `awscli` 패키지가 없으므로**
+공식 설치 스크립트를 사용한다.
 
-### 3. redis.conf 편집
+### 4. redis.conf 편집
 
 ```bash
 cp /etc/redis/redis.conf /etc/redis/redis.conf.bak
 ```
 
-아래 항목을 설정한다.
-
-```
-bind 10.20.10.30
-protected-mode yes
-port 6379
-
-maxmemory 1gb
-maxmemory-policy volatile-lru
-
-appendonly yes
-appendfsync everysec
-
-user default off
-user app on ><password> ~* &* +@all -@dangerous -@admin
-```
-
-`<password>` 는 2단계에서 조회한 값으로 치환한다.
-
-### 4. 권한 설정
+기존 값을 치환한다.
 
 ```bash
-chmod 640 /etc/redis/redis.conf
-chown redis:redis /etc/redis/redis.conf
+sed -i 's/^bind 127.0.0.1 -::1/bind 10.20.10.30/' /etc/redis/redis.conf
+sed -i 's/^appendonly no/appendonly yes/' /etc/redis/redis.conf
 ```
 
-### 5. 기동
+없는 항목을 추가한다.
+
+```bash
+cat >> /etc/redis/redis.conf << 'EOF'
+
+# 인스턴스 메모리 2GiB 중 절반.
+# 복제 버퍼, 클라이언트 출력 버퍼, 단편화, OS 가 나머지를 사용한다.
+maxmemory 1gb
+
+# TTL 이 설정된 키만 evict 대상.
+maxmemory-policy volatile-lru
+
+# ACL 은 별도 파일로 관리한다.
+aclfile /etc/redis/acl-users.conf
+EOF
+```
+
+### 5. ACL 파일 생성
+
+**주석과 빈 줄을 넣지 않는다.** 기동이 실패한다.
+
+```bash
+cat > /etc/redis/acl-users.conf << EOF
+user default off
+user app on >$PASSWORD ~* &* +@read +@write +@connection -@dangerous
+EOF
+```
+
+### 6. 권한 설정
+
+```bash
+chmod 640 /etc/redis/redis.conf /etc/redis/redis.conf.bak /etc/redis/acl-users.conf
+chown redis:redis /etc/redis/redis.conf /etc/redis/redis.conf.bak /etc/redis/acl-users.conf
+```
+
+### 7. 기동
 
 ```bash
 systemctl enable redis-server
 systemctl start redis-server
-systemctl status redis-server
+systemctl status redis-server --no-pager
+```
+
+기동에 실패하면 로그를 확인한다.
+`systemctl status` 만으로는 원인이 드러나지 않는다.
+
+```bash
+tail -20 /var/log/redis/redis-server.log
 ```
 
 ---
 
 ## 검증
 
-### 서비스 상태
+### 인증
 
 ```bash
-systemctl is-active redis-server
-redis-cli --user app --pass <password> ping
+redis-cli -h 10.20.10.30 ping
 ```
 
-인증 없이 접속하면 거부되어야 한다.
+```
+(error) NOAUTH Authentication required.
+```
+
+`default` 계정을 비활성화했으므로 인증 없이 접속할 수 없다.
 
 ```bash
-redis-cli ping
-# (error) NOAUTH Authentication required.
+redis-cli -h 10.20.10.30 --user app --pass "$PASSWORD" ping
 ```
+
+```
+PONG
+```
+
+### 데이터 조작
+
+```bash
+redis-cli -h 10.20.10.30 --user app --pass "$PASSWORD" SET test:key 1
+redis-cli -h 10.20.10.30 --user app --pass "$PASSWORD" GET test:key
+redis-cli -h 10.20.10.30 --user app --pass "$PASSWORD" DEL test:key
+```
+
+### 권한 차단
+
+```bash
+redis-cli -h 10.20.10.30 --user app --pass "$PASSWORD" FLUSHALL
+redis-cli -h 10.20.10.30 --user app --pass "$PASSWORD" INFO memory
+redis-cli -h 10.20.10.30 --user app --pass "$PASSWORD" CONFIG GET maxmemory
+```
+
+전부 `NOPERM` 이어야 한다.
 
 ### 설정 확인
 
-```bash
-redis-cli --user app --pass <password> CONFIG GET maxmemory
-redis-cli --user app --pass <password> CONFIG GET maxmemory-policy
-redis-cli --user app --pass <password> CONFIG GET appendonly
-```
-
-`CONFIG` 는 `-@admin` 으로 제한했으므로 app 사용자로는 실패한다.
-서버에서 기본 계정을 일시적으로 활성화하거나 `redis.conf` 를 직접 확인한다.
-
-### ACL 확인
+`CONFIG` 와 `INFO` 가 차단되어 있으므로 서버에서 파일을 직접 확인한다.
 
 ```bash
-redis-cli --user app --pass <password> ACL WHOAMI
-# app
-
-redis-cli --user app --pass <password> FLUSHALL
-# (error) NOPERM ... has no permissions to run the 'flushall' command
+grep -E "^(bind|appendonly|appendfsync|maxmemory|aclfile)" /etc/redis/redis.conf
+ls -la /var/lib/redis/
 ```
 
-위험 명령이 차단되는지 확인한다.
-
-### 네트워크 확인
-
-Worker 노드에서 포트 도달 여부를 본다.
-
-```bash
-ansible -i inventory/logssey/inventory.ini worker-a -m shell -b \
-  -a "timeout 3 bash -c 'echo > /dev/tcp/10.20.10.30/6379'; echo exit=\$?"
-```
-
-`exit=0` 이어야 한다.
+`appendonlydir/` 이 생성되어 있으면 AOF 가 동작하는 것이다.
 
 ### Pod 에서 연결
 
-```bash
-kubectl run redistest --rm -it --image=redis:7-alpine --restart=Never -- \
-  redis-cli -h 10.20.10.30 --user app --pass <password> ping
-```
-
-### db 분리 확인
+Control Plane 노드에서 실행한다.
 
 ```bash
-redis-cli -h 10.20.10.30 --user app --pass <password> -n 0 SET cache:test 1
-redis-cli -h 10.20.10.30 --user app --pass <password> -n 1 GET cache:test
-# (nil)
+kubectl run redistest --restart=Never \
+  --image=redis:7-alpine \
+  -- redis-cli -h 10.20.10.30 --user app --pass '<password>' ping
+
+kubectl get pod redistest
+kubectl logs redistest
+kubectl delete pod redistest
 ```
 
-db 0 에 쓴 값이 db 1 에서 보이지 않아야 한다.
+`PONG` 이 나오면 Worker Pod 에서 Redis 까지 경로가 열린 것이다.
+
+이미지를 받는 데 시간이 걸리므로 `kubectl get pod` 로
+`Completed` 를 확인한 뒤 로그를 조회한다.
 
 ---
 
@@ -467,6 +558,8 @@ resource "aws_vpc_security_group_ingress_rule" "redis_ssh_from_k8s_node" {
 
 | 항목 | 시점 |
 | --- | --- |
+| 모니터링 전용 ACL 계정 | Prometheus exporter 등 도입 시 |
+| 키 패턴 제한 (`~cache:* ~token:*`) | 백엔드 키 네이밍 확정 후 |
 | 인스턴스 분리 (캐시 / 토큰) | 메모리 사용량이 maxmemory 에 근접할 때 |
 | Ansible 설정 관리 | 노드가 늘거나 재현성이 필요할 때 |
 | TLS | 외부 노출 또는 규제 요구 발생 시 |
