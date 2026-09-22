@@ -241,3 +241,26 @@ resource "aws_vpc_security_group_ingress_rule" "control_plane_internal_6443" {
   to_port                      = 6443
   description                  = "apiserver between control planes"
 }
+
+# ── 7-b. Control Plane → Control Plane (kubelet API) ──
+# apiserver 가 CP 노드의 kubelet 에 접근한다.
+# kubectl exec / logs / top, cilium connectivity test 가 이 경로를 사용한다.
+resource "aws_vpc_security_group_ingress_rule" "control_plane_kubelet" {
+  security_group_id            = aws_security_group.control_plane.id
+  referenced_security_group_id = aws_security_group.control_plane.id
+  ip_protocol                  = "tcp"
+  from_port                    = 10250
+  to_port                      = 10250
+  description                  = "kubelet API between control planes"
+}
+
+# ── 7-c. Worker → Control Plane (kubelet API) ──
+# metrics-server 등 워커에서 동작하는 컴포넌트가 CP 노드의 kubelet 을 조회한다.
+resource "aws_vpc_security_group_ingress_rule" "control_plane_kubelet_from_worker" {
+  security_group_id            = aws_security_group.control_plane.id
+  referenced_security_group_id = aws_security_group.worker.id
+  ip_protocol                  = "tcp"
+  from_port                    = 10250
+  to_port                      = 10250
+  description                  = "kubelet API from worker"
+}
