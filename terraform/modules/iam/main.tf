@@ -42,6 +42,16 @@ resource "aws_iam_role_policy_attachment" "ecr_readonly" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
+# EBS CSI Driver 볼륨 관리.
+#
+# permissive 모드의 AmazonEC2FullAccess 로도 동작하나,
+# strict 전환 시 해당 정책이 제거되면 PVC 프로비저닝이 중단된다.
+# 최소 권한 정책을 별도로 부착해 모드와 무관하게 유지한다.
+resource "aws_iam_role_policy_attachment" "ebs_csi" {
+  role       = aws_iam_role.node.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
 # ─────────────────────────────────────────────
 # 상태 파일 버킷 보호 — 모드 무관, 항상 적용
 #
