@@ -13,6 +13,7 @@
 | [05](05-apiserver-sg-kpr.md) | Service 접속 불가 (replacement) | SG — Worker → CP 6443 누락 | kube-proxy replacement 전환 후 |
 | [06](06-kubelet-api-sg.md) | kubelet API 접근 불가 | SG — CP 10250 누락 | connectivity test |
 | [07](07-iptables-corruption-l7.md) | L7 NetworkPolicy 미동작 | iptables 직접 조작으로 Cilium 상태 손상 | connectivity test |
+| [08](08-envoy-gateway-nodeport.md) | Envoy Gateway NodePort 고정 실패 | StrategicMerge 병합 키, DoNotSchedule 교착 | Envoy Gateway 구성 |
 
 04와 05는 같은 증상의 서로 다른 원인이다. 04를 해결한 뒤에도 증상이 남아 05로 이어졌다.
 
@@ -27,6 +28,7 @@
 | Kubespray 동작 특성 | 2 | 01, 04 |
 | 환경 전제 불일치 | 1 | 03 |
 | 조치가 만든 2차 문제 | 1 | 07 |
+| 매니페스트 문법·스케줄링 | 2 | 08(2건) |
 
 **SG 관련이 가장 많다.** 설계 시 정의한 통신 경로가 실제 도구의 동작과 달랐던 경우다.
 
@@ -106,6 +108,27 @@ ansible -i <inventory> <host> -m shell -b \
 
 **ICMP 가 SG에서 막힌 환경에서는 2번이 항상 실패**하므로 주의한다.
 SSH·Ansible 이 동작하는데 ping 이 전부 실패하면 ICMP 차단을 의심한다.
+
+### 컨트롤러 리소스 진단
+
+Gateway API 나 CRD 기반 컨트롤러는 리소스 상태가 정상이어도
+내부 처리가 실패하고 있을 수 있다. 에러가 컨트롤러 로그에만 남는다.
+
+```bash
+kubectl -n <ns> logs -l <controller-label> --tail=30 | grep -iE "error"
+```
+
+| 컴포넌트 | 라벨 |
+| --- | --- |
+| Envoy Gateway | `control-plane=envoy-gateway` |
+| EBS CSI | `app=ebs-csi-controller` |
+| cilium-csr-approver | `app.kubernetes.io/name=kubelet-csr-approver` |
+
+리소스 status 의 `conditions` 도 함께 확인한다.
+
+```bash
+kubectl get <kind> <name> -o jsonpath='{.status.conditions}' | python3 -m json.tool
+```
 
 ### 로그 시점 구분
 
