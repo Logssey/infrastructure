@@ -58,6 +58,8 @@ SG 규칙 단위 태그는 provider 5.x에서 도입된 기능이며 `descriptio
 | 6 | sg-etcd | sg-etcd | TCP 2380 | etcd peer (Raft) |
 | 6-b | sg-etcd | sg-etcd | TCP 2379 | etcd client between members |
 | 7 | sg-control-plane | sg-worker | TCP 10250 | kubelet API |
+| 7-b | sg-control-plane | sg-control-plane | TCP 10250 | kubelet API (CP 간) |
+| 7-c | sg-worker | sg-control-plane | TCP 10250 | kubelet API (Worker → CP) |
 | 8 | sg-k8s-node | sg-k8s-node | UDP 8472 | Cilium VXLAN 터널 |
 | 9 | sg-k8s-node | sg-k8s-node | TCP 4240 | Cilium agent health check |
 | 9-b | sg-k8s-node | sg-k8s-node | ICMP | Cilium health 노드 프로브 |
@@ -81,6 +83,7 @@ SG 규칙 단위 태그는 provider 5.x에서 도입된 기능이며 `descriptio
 | 6-b | Kubespray의 `etcdctl endpoint health --cluster` 체크가 etcd 노드에서 다른 멤버의 클라이언트 포트로 접속한다. peer 포트(2380)는 Raft 전용이라 이 경로를 대체하지 않는다. | [02](troubleshooting/02-etcd-client-sg.md) |
 | 4-b, 4-c | Cilium kube-proxy replacement 사용 시 eBPF가 Service IP를 백엔드(CP 노드의 6443)로 직접 변환한다. Internal NLB를 거치지 않으므로 직접 경로가 필요하다. | [05](troubleshooting/05-apiserver-sg-kpr.md) |
 | 9-b | `cilium-health`의 노드 간 프로브가 ICMP를 사용한다. 없으면 `Cluster health`가 1/N reachable로 표시되어 다른 문제 진단 시 혼선을 준다. | [05](troubleshooting/05-apiserver-sg-kpr.md) |
+| 7-b, 7-c | `kubectl exec`·`logs`·`top` 과 apiserver 의 Pod 접근이 kubelet API(10250)를 사용한다. 설계 시 CP → Worker 방향만 정의했으나 CP 노드로 향하는 경로도 필요하다. metrics-server 설치 시 Worker → CP 경로가 쓰인다. | [06](troubleshooting/06-kubelet-api-sg.md) |
 
 **4-b와 4-c는 CNI 설정에 따라 필요 여부가 달라진다.**
 kube-proxy replacement를 끄면 트래픽이 Internal NLB를 경유하므로 불필요하다.
