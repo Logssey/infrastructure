@@ -63,6 +63,20 @@ module "edge" {
   domain_name = var.domain_name
 }
 
+module "rds" {
+  source = "../../modules/rds"
+
+  name_prefix = local.name_prefix
+
+  private_data_subnet_ids = module.network.private_data_subnet_ids
+  rds_sg_id               = module.security.rds_sg_id
+
+  engine_version         = var.rds_engine_version
+  parameter_group_family = var.rds_parameter_group_family
+  instance_class         = var.rds_instance_class
+  multi_az               = var.rds_multi_az
+}
+
 module "lb" {
   source = "../../modules/lb"
 

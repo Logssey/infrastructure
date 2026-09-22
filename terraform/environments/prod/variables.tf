@@ -160,3 +160,34 @@ variable "domain_name" {
   type        = string
   default     = "re-used.store"
 }
+
+# ─────────────────────────────────────────────
+# RDS
+# ─────────────────────────────────────────────
+
+variable "rds_engine_version" {
+  description = <<-EOT
+    PostgreSQL 버전. 변경 시 rds_parameter_group_family 도 함께 맞춘다.
+    메이저 버전이 다르면 파라미터 그룹 family 가 달라진다.
+  EOT
+  type        = string
+  default     = "18.6"
+}
+
+variable "rds_parameter_group_family" {
+  description = "파라미터 그룹 family. rds_engine_version 의 메이저 버전과 일치해야 한다."
+  type        = string
+  default     = "postgres18"
+}
+
+variable "rds_instance_class" {
+  description = "RDS 인스턴스 클래스"
+  type        = string
+  default     = "db.t4g.small"
+}
+
+variable "rds_multi_az" {
+  description = "Multi-AZ 배치. 활성화 시 비용이 2배가 된다."
+  type        = bool
+  default     = false
+}
