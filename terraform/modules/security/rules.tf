@@ -264,3 +264,14 @@ resource "aws_vpc_security_group_ingress_rule" "control_plane_kubelet_from_worke
   to_port                      = 10250
   description                  = "kubelet API from worker"
 }
+
+# ── 7-d. Worker → Worker (kubelet API) ──
+# metrics-server 가 워커에 배치되면 다른 워커와 자기 자신의 kubelet 을 조회한다.
+resource "aws_vpc_security_group_ingress_rule" "worker_kubelet_internal" {
+  security_group_id            = aws_security_group.worker.id
+  referenced_security_group_id = aws_security_group.worker.id
+  ip_protocol                  = "tcp"
+  from_port                    = 10250
+  to_port                      = 10250
+  description                  = "kubelet API between workers"
+}
