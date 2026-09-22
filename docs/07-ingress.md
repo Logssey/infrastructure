@@ -126,8 +126,7 @@ EKS 에서 일반적인 방식이다.
 
 **채택하지 않았다.**
 
-Public NLB 를 이미 Terraform 으로 구축하고 검증했다. 컨트롤러 방식으로
-전환하면 스프린트 3의 CloudFront 연결까지 영향을 받는다.
+Public NLB 를 이미 Terraform 으로 구축하고 검증했다. 
 
 그리고 인프라 리소스를 Terraform 이 소유한다는 원칙이 설계 전반에 일관된다.
 컨트롤러가 LB 를 만들면 Terraform 상태 밖의 AWS 리소스가 생겨

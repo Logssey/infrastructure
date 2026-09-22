@@ -1,0 +1,56 @@
+# Envoy Proxy 인프라 설정
+#
+# GatewayClass 의 parametersRef 로 연결한다.
+# Gateway 보다 먼저 생성해야 Service 재생성에 따른 중단이 없다.
+
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: logssey-proxy
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        # Worker 3대에 각각 배치한다. Pod 1개면 해당 노드 장애 시 전면 중단된다.
+        replicas: 3
+        pod:
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              # DoNotSchedule 로 두면 replica 수가 노드 수와 같을 때
+              # 롤링 업데이트의 서지 Pod 가 배치될 자리가 없어 Pending 에 머문다.
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: envoy
+                  gateway.envoyproxy.io/owning-gateway-name: eg
+
+      envoyService:
+        # 클러스터에 AWS Load Balancer Controller 가 없어 LoadBalancer 는
+        # EXTERNAL-IP 가 pending 에 머문다.
+        # Public NLB 는 Terraform 이 관리하며 NodePort 로 연결한다.
+        type: NodePort
+
+        # 기본값 Local 은 Envoy Pod 가 있는 노드만 응답해
+        # NLB 타겟 일부가 unhealthy 로 남는다.
+        # Public NLB 의 Client IP Preservation 을 이미 비활성화했고
+        # 실제 클라이언트 IP 는 CloudFront 의 X-Forwarded-For 로 받으므로
+        # Local 을 유지할 이유가 없다.
+        externalTrafficPolicy: Cluster
+
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              ports:
+                # Service.ports 의 StrategicMerge 병합 키는 port 다.
+                # name 만 지정하면 아래 에러로 인프라 생성이 실패한다.
+                #   does not contain declared merge key: port
+                #
+                # 포트 이름은 리스너 이름이 아니라 "http-<port>" 형식이다.
+                # NodePort 30080 은 Public NLB 타겟 그룹, SG 2번 규칙과 일치해야 한다.
+                - port: 80
+                  name: http-80
+                  nodePort: 30080

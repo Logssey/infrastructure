@@ -1,0 +1,17 @@
+# GatewayClass
+#
+# parametersRef 로 EnvoyProxy 를 연결해 클러스터 전체 인프라 설정을 적용한다.
+# Gateway 가 여러 개이고 각각 다른 인프라 설정이 필요하면
+# Gateway 의 infrastructure.parametersRef 로 옮긴다.
+
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: logssey-proxy
+    namespace: envoy-gateway-system

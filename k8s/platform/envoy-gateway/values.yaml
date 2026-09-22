@@ -1,0 +1,29 @@
+# Envoy Gateway — Helm values
+#
+# 차트   oci://docker.io/envoyproxy/gateway-helm v1.9.1
+# 설치   envoy-gateway-system
+#
+# Gateway API CRD(v1.6.1)와 Envoy Gateway CRD 를 함께 설치한다.
+# crds.enabled 기본값 true 를 유지한다.
+#
+# certgen 이 webhook 인증서를 자체 생성하므로 cert-manager 가 필요하지 않다.
+#
+# 이 Deployment 는 컨트롤플레인이다. 실제 트래픽은 Gateway 생성 시
+# 만들어지는 Envoy Proxy Pod 가 처리한다.
+# 컨트롤플레인이 중단되어도 기존 Envoy 는 동작하나 설정 변경이 반영되지 않는다.
+
+deployment:
+  replicas: 2
+
+  pod:
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            control-plane: envoy-gateway
+
+# 기본값 0 은 아무것도 보호하지 않는다.
+podDisruptionBudget:
+  minAvailable: 1
