@@ -1,6 +1,6 @@
 # Kubernetes 애드온
 
-클러스터에 설치하는 플랫폼 컴포넌트의 Helm values 를 관리한다.
+클러스터에 설치하는 플랫폼 컴포넌트의 Helm values 와 매니페스트를 관리한다.
 
 ## 구조
 
@@ -9,6 +9,7 @@ k8s/
   platform/           클러스터 공통 컴포넌트
     metrics-server/
     aws-ebs-csi-driver/
+    envoy-gateway/
 ```
 
 애플리케이션 매니페스트는 별도 저장소에서 관리한다.
@@ -19,6 +20,7 @@ k8s/
 | --- | --- | --- | --- |
 | metrics-server | 3.14.0 | 0.9.0 | kube-system |
 | aws-ebs-csi-driver | 2.66.0 | 1.66.0 | kube-system |
+| envoy-gateway | v1.9.1 | v1.9.1 | envoy-gateway-system |
 
 ## 설치 방법
 
@@ -33,6 +35,8 @@ helm repo update
 
 helm install <name> <chart> --version <ver> -n <ns> -f values.yaml
 ```
+
+Envoy Gateway 는 OCI 레지스트리를 사용하므로 repo 추가가 필요 없다.
 
 **설치 전 렌더링 결과를 확인한다.**
 
@@ -238,8 +242,123 @@ AWS 에서 볼륨이 남아 있지 않은지 확인한다. 남으면 비용이 �
 
 ---
 
+## envoy-gateway
+
+외부 진입점. Gateway API 구현체로 Public NLB 의 트래픽을 받아
+클러스터 내부 Service 로 라우팅한다.
+
+설계와 진입 경로 전체는 `docs/07-ingress.md` 참조.
+
+### 구성 파일
+
+| 파일 | 리소스 |
+| --- | --- |
+| `values.yaml` | Helm values (컨트롤플레인) |
+| `envoyproxy.yaml` | EnvoyProxy — Envoy Proxy 인프라 설정 |
+| `gatewayclass.yaml` | GatewayClass |
+| `gateway.yaml` | Gateway (HTTP 80 리스너) |
+
+### 설치 순서
+
+**EnvoyProxy 를 Gateway 보다 먼저 만든다.** 나중에 연결하면
+Envoy Service 가 재생성되며 일시적으로 트래픽이 끊긴다.
+
+```bash
+helm install eg oci://docker.io/envoyproxy/gateway-helm \
+  --version v1.9.1 \
+  -n envoy-gateway-system \
+  --create-namespace \
+  -f values.yaml
+
+kubectl wait --timeout=5m -n envoy-gateway-system \
+  deployment/envoy-gateway --for=condition=Available
+
+kubectl apply -f envoyproxy.yaml
+kubectl apply -f gatewayclass.yaml
+kubectl apply -f gateway.yaml
+```
+
+### 전제 조건
+
+| 항목 | 내용 |
+| --- | --- |
+| Public NLB 타겟 그룹 | TCP 30080, Worker 3대 |
+| SG 2번 규칙 | sg-public-nlb → sg-worker : TCP 30080 |
+| cert-manager | **불필요.** certgen 이 webhook 인증서를 자체 생성 |
+
+### 검증
+
+```bash
+kubectl -n envoy-gateway-system get gateway,gatewayclass,envoyproxy
+```
+
+| 리소스 | 기대 |
+| --- | --- |
+| GatewayClass | ACCEPTED True |
+| Gateway | PROGRAMMED True, ADDRESS 에 노드 IP |
+
+```bash
+kubectl -n envoy-gateway-system get svc \
+  -l gateway.envoyproxy.io/owning-gateway-name=eg
+```
+
+`TYPE: NodePort`, `PORT(S): 80:30080/TCP` 여야 한다.
+
+```bash
+kubectl -n envoy-gateway-system get pods -o wide | grep envoy-envoy
+```
+
+Envoy Proxy Pod 3개가 Worker 3대에 분산되어야 한다.
+
+노드별 응답 확인. 라우트가 없으면 404 가 정상이다.
+
+```bash
+for ip in 10.20.10.20 10.20.11.20 10.20.12.20; do
+  printf "%-14s " "$ip"
+  curl -sS -o /dev/null -w "%{http_code}\n" --max-time 5 http://$ip:30080/
+done
+```
+
+NLB 타겟 상태.
+
+```bash
+aws elbv2 describe-target-health \
+  --target-group-arn <ENVOY_TG_ARN> \
+  --region ap-northeast-1 \
+  --query 'TargetHealthDescriptions[].[Target.Id,TargetHealth.State]' \
+  --output table
+```
+
+Worker 3대 전부 healthy 여야 한다.
+일부만 healthy 이면 `externalTrafficPolicy` 를 확인한다.
+
+### HTTPRoute
+
+애플리케이션 배포 시 정의한다. Gateway 가 `envoy-gateway-system` 에 있으므로
+다른 네임스페이스의 HTTPRoute 는 `parentRefs` 에 네임스페이스를 명시한다.
+
+```yaml
+spec:
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+```
+
+Gateway 의 `allowedRoutes.namespaces.from: All` 이 이를 허용한다.
+
+연결 상태는 HTTPRoute 의 status 로 확인한다.
+
+```bash
+kubectl get httproute <name> -o jsonpath='{.status.parents[0].conditions}' \
+  | python3 -m json.tool
+```
+
+`Accepted` 와 `ResolvedRefs` 가 모두 True 여야 한다.
+
+---
+
 ## 보류
 
 | 컴포넌트 | 사유 |
 | --- | --- |
-| cert-manager | 용도가 불명확하다. 외부 TLS 는 CloudFront 와 ACM 이 담당하므로 클러스터 내부에서 인증서가 필요한 시점에 재검토한다. |
+| cert-manager | 용도가 불명확하다. 외부 TLS 는 CloudFront 와 ACM 이, webhook 인증서는 Envoy Gateway 의 certgen 이 담당한다. 클러스터 내부에서 인증서가 필요한 시점에 재검토한다. |
