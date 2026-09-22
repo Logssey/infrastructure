@@ -43,7 +43,13 @@ variable "worker_instance_ids" {
 }
 
 variable "envoy_node_port" {
-  description = "Envoy Gateway NodePort. docs/02-security.md 의 SG 규칙과 일치해야 한다."
+  description = <<-EOT
+    Envoy Gateway NodePort. 루트 모듈에서 전달받는다.
+
+    같은 값을 공유하는 곳:
+      - security 모듈의 SG 2번 규칙
+      - k8s/platform/envoy-gateway/envoyproxy.yaml 의 nodePort
+  EOT
   type        = number
   default     = 30080
 }
