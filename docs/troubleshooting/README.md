@@ -11,7 +11,7 @@
 | [03](03-cilium-cni-bin-permission.md) | Cilium mount-cgroup 실패 | `/opt/cni/bin` 소유자, `DAC_OVERRIDE` 없음 | Cilium 기동 |
 | [04](04-kube-proxy-ipvs-conflict.md) | Service 접속 불가 (병행 구성) | kube-proxy IPVS ↔ Cilium eBPF 충돌 | 클러스터 기동 후 |
 | [05](05-apiserver-sg-kpr.md) | Service 접속 불가 (replacement) | SG — Worker → CP 6443 누락 | kube-proxy replacement 전환 후 |
-| [06](06-kubelet-api-sg.md) | kubelet API 접근 불가 | SG — CP 10250 누락 | connectivity test |
+| [06](06-kubelet-api-sg.md) | kubelet API 접근 불가 | SG — 10250 방향 누락 | connectivity test |
 | [07](07-iptables-corruption-l7.md) | L7 NetworkPolicy 미동작 | iptables 직접 조작으로 Cilium 상태 손상 | connectivity test |
 | [08](08-envoy-gateway-nodeport.md) | Envoy Gateway NodePort 고정 실패 | StrategicMerge 병합 키, DoNotSchedule 교착 | Envoy Gateway 구성 |
 
@@ -22,15 +22,25 @@
 
 ## 분류
 
-| 유형 | 건수 | 해당 |
-| --- | --- | --- |
-| Security Group 설계 누락 | 6 | 02, 05(2건), 06(2건), 05의 ICMP |
-| Kubespray 동작 특성 | 2 | 01, 04 |
-| 환경 전제 불일치 | 1 | 03 |
-| 조치가 만든 2차 문제 | 1 | 07 |
-| 매니페스트 문법·스케줄링 | 2 | 08(2건) |
+SG 규칙 누락이 가장 많다. 한 문서에서 여러 규칙을 추가한 경우가 있어
+문서 수와 규칙 수가 일치하지 않는다.
 
-**SG 관련이 가장 많다.** 설계 시 정의한 통신 경로가 실제 도구의 동작과 달랐던 경우다.
+| 유형 | 추가된 SG 규칙 | 해당 문서 |
+| --- | --- | --- |
+| Security Group 설계 누락 | 7 | 02(1), 05(3), 06(3) |
+| Kubespray 동작 특성 | — | 01, 04 |
+| 환경 전제 불일치 | — | 03 |
+| 조치가 만든 2차 문제 | — | 07 |
+| 매니페스트 문법·스케줄링 | — | 08 |
+
+| 문서 | 추가한 규칙 |
+| --- | --- |
+| 02 | 6-b (etcd 멤버 간 2379) |
+| 05 | 4-b, 4-c (apiserver 직접), 9-b (ICMP) |
+| 06 | 7-b, 7-c, 7-d (kubelet API 방향) |
+
+**설계 시 정의한 통신 경로가 실제 도구의 동작과 달랐던 경우다.**
+포트 하나에 대해 출발지 × 목적지 조합을 모두 검토해야 한다.
 
 ## 설계 변경으로 이어진 항목
 
@@ -38,8 +48,8 @@
 | --- | --- | --- |
 | kube-proxy replacement | 미적용 | 적용 |
 | etcd 2379 접근 | Control Plane만 | + 멤버 간 |
-| apiserver 접근 경로 | Internal NLB 경유 | + Worker → CP 직접 |
-| kubelet API 10250 | CP → Worker만 | + CP 간, Worker → CP |
+| apiserver 접근 경로 | Internal NLB 경유 | + Worker → CP, CP 간 직접 |
+| kubelet API 10250 | CP → Worker만 | + CP 간, Worker → CP, Worker 간 |
 | 노드 간 ICMP | 미허용 | 허용 |
 
 ## 진단 참고
@@ -122,7 +132,7 @@ kubectl -n <ns> logs -l <controller-label> --tail=30 | grep -iE "error"
 | --- | --- |
 | Envoy Gateway | `control-plane=envoy-gateway` |
 | EBS CSI | `app=ebs-csi-controller` |
-| cilium-csr-approver | `app.kubernetes.io/name=kubelet-csr-approver` |
+| kubelet-csr-approver | `app.kubernetes.io/name=kubelet-csr-approver` |
 
 리소스 status 의 `conditions` 도 함께 확인한다.
 
@@ -193,3 +203,6 @@ cilium version
 
 일반화할 수 있는 내용이 있으면 `## 교훈` 을 추가한다.
 진단 과정과 재발 방지에 이미 담겨 있다면 생략한다.
+
+배경 지식이 필요하면 증상 앞에 `## 배경` 을 둔다.
+용어나 구조를 모르면 진단 과정을 따라갈 수 없는 경우에 해당한다.
