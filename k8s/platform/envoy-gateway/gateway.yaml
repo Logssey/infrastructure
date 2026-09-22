@@ -1,0 +1,22 @@
+# Gateway
+#
+# TLS 는 CloudFront 와 Public NLB 가 종단한다.
+# NLB → Envoy 구간은 VPC 내부이며 평문 HTTP 다.
+#
+# allowedRoutes.namespaces.from: All 로 두어
+# 애플리케이션 네임스페이스에서 HTTPRoute 를 붙일 수 있게 한다.
+
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All

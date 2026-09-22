@@ -96,3 +96,45 @@ variable "security_mode" {
     error_message = "security_mode는 permissive 또는 strict 여야 한다."
   }
 }
+
+variable "tfstate_bucket" {
+  description = "Terraform 상태 파일 버킷. 노드 Role 의 접근을 차단하는 데 사용한다."
+  type        = string
+  default     = "logssey-prod-s3-tfstate"
+}
+
+# ─────────────────────────────────────────────
+# 노드 사설 IP
+#   역할별로 끝자리를 구분한다. docs/04-compute.md 참조
+#   .10 = Control Plane / etcd, .20 = Worker, .30 = Redis
+# ─────────────────────────────────────────────
+
+variable "control_plane_private_ips" {
+  description = "Control Plane 사설 IP. azs 순서와 대응"
+  type        = list(string)
+  default     = ["10.20.10.10", "10.20.11.10", "10.20.12.10"]
+}
+
+variable "etcd_private_ips" {
+  description = "etcd 사설 IP"
+  type        = list(string)
+  default     = ["10.20.20.10", "10.20.21.10", "10.20.22.10"]
+}
+
+variable "worker_private_ips" {
+  description = "Worker 사설 IP"
+  type        = list(string)
+  default     = ["10.20.10.20", "10.20.11.20", "10.20.12.20"]
+}
+
+variable "redis_private_ip" {
+  description = "Redis 사설 IP. Private-App AZ-a 에 배치"
+  type        = string
+  default     = "10.20.10.30"
+}
+
+variable "domain_name" {
+  description = "서비스 도메인. 가비아에서 구매"
+  type        = string
+  default     = "re-used.store"
+}

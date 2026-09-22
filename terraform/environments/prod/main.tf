@@ -24,3 +24,56 @@ module "security" {
   vpc_id        = module.network.vpc_id
   security_mode = var.security_mode
 }
+
+module "iam" {
+  source = "../../modules/iam"
+
+  name_prefix    = local.name_prefix
+  security_mode  = var.security_mode
+  tfstate_bucket = var.tfstate_bucket
+}
+
+module "compute" {
+  source = "../../modules/compute"
+
+  name_prefix           = local.name_prefix
+  azs                   = var.azs
+  instance_profile_name = module.iam.node_instance_profile_name
+
+  private_app_subnet_ids  = module.network.private_app_subnet_ids
+  private_etcd_subnet_ids = module.network.private_etcd_subnet_ids
+
+  control_plane_sg_id = module.security.control_plane_sg_id
+  etcd_sg_id          = module.security.etcd_sg_id
+  worker_sg_id        = module.security.worker_sg_id
+  k8s_node_sg_id      = module.security.k8s_node_sg_id
+  redis_sg_id         = module.security.redis_sg_id
+
+  control_plane_private_ips = var.control_plane_private_ips
+  etcd_private_ips          = var.etcd_private_ips
+  worker_private_ips        = var.worker_private_ips
+  redis_private_ip          = var.redis_private_ip
+}
+
+module "edge" {
+  source = "../../modules/edge"
+
+  name_prefix = local.name_prefix
+  domain_name = var.domain_name
+}
+
+module "lb" {
+  source = "../../modules/lb"
+
+  name_prefix = local.name_prefix
+  vpc_id      = module.network.vpc_id
+
+  private_app_subnet_ids = module.network.private_app_subnet_ids
+  public_subnet_ids      = module.network.public_subnet_ids
+
+  internal_nlb_sg_id = module.security.internal_nlb_sg_id
+  public_nlb_sg_id   = module.security.public_nlb_sg_id
+
+  control_plane_instance_ids = module.compute.control_plane_instance_ids
+  worker_instance_ids        = module.compute.worker_instance_ids
+}

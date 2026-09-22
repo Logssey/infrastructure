@@ -13,3 +13,8 @@ credentials
 
 # OS
 .DS_Store
+# Kubespray
+credentials/
+*.creds
+kubeconfig
+admin.conf

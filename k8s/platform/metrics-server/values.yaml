@@ -1,0 +1,52 @@
+# metrics-server
+#
+# 차트   metrics-server/metrics-server 3.14.0 (app 0.9.0)
+# 저장소 https://kubernetes-sigs.github.io/metrics-server/
+# 설치   kube-system
+
+# ─────────────────────────────────────────────
+# kubelet TLS 검증
+#
+# --kubelet-insecure-tls 를 사용하지 않는다.
+# kubelet_rotate_server_certificates: true 로 kubelet 인증서가
+# 클러스터 CA(CN=kubernetes)로 서명되며 SAN 에 노드명과 IP 가 포함된다.
+#
+# args 는 차트의 defaultArgs 에 추가되는 구조다. 덮어쓰지 않는다.
+#   --cert-dir=/tmp
+#   --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+#   --kubelet-use-node-status-port
+#   --metric-resolution=15s
+#
+# --kubelet-preferred-address-types 는 InternalIP 가 첫 번째이므로
+# 기본값을 그대로 사용한다.
+# ─────────────────────────────────────────────
+
+args:
+  - --kubelet-certificate-authority=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+
+# ─────────────────────────────────────────────
+# 고가용성
+# ─────────────────────────────────────────────
+
+replicas: 2
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 200Mi
+  limits:
+    memory: 400Mi
+
+# 두 replica 를 서로 다른 노드에 배치한다.
+# 차트가 자동으로 anti-affinity 를 넣지 않으므로 명시한다.
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: metrics-server
