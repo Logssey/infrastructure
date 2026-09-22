@@ -258,7 +258,7 @@ aws rds create-db-snapshot \
 
 | 파라미터 | 값 | 유형 |
 | --- | --- | --- |
-| `rds.force_ssl` | 1 | static (재부팅 필요) |
+| `rds.force_ssl` | 1 | dynamic (재부팅 불필요) |
 
 **나머지는 기본값을 유지한다.**
 
@@ -274,8 +274,8 @@ aws rds create-db-snapshot \
 
 | 유형 | 적용 | 예시 |
 | --- | --- | --- |
-| dynamic | 즉시 | `log_statement`, `log_connections` |
-| static | 재부팅 필요 | `rds.force_ssl`, `max_connections`, `shared_buffers` |
+| dynamic | 즉시 | `rds.force_ssl`, `log_statement`, `log_connections` |
+| static | 재부팅 필요 | `max_connections`, `shared_buffers` |
 
 로그 관련은 대부분 dynamic 이라 나중에 무중단으로 조정할 수 있다.
 
@@ -405,12 +405,40 @@ aws rds describe-db-parameters \
 
 연결 테스트 — Worker Pod 에서
 
+비밀번호에 URL 예약 문자가 포함될 수 있으므로 연결 문자열 대신
+`PGPASSWORD` 환경변수와 개별 인자를 사용한다.
+
 ```bash
-kubectl run pgtest --rm -it --image=postgres:18-alpine --restart=Never -- \
-  psql "postgresql://logssey_admin:<password>@<endpoint>:5432/reused?sslmode=require" -c "SELECT version();"
+kubectl run pgtest --restart=Never \
+  --image=postgres:18-alpine \
+  --env="PGPASSWORD=<password>" \
+  -- psql -h <endpoint> -U logssey_admin -d reused \
+  -c "SELECT ssl, version, cipher FROM pg_stat_ssl WHERE pid = pg_backend_pid();"
+
+kubectl logs pgtest
+kubectl delete pod pgtest
 ```
 
-SSL 강제가 동작하는지 확인하려면 `sslmode=disable` 로 시도해 거부되는지 본다.
+정상이면 아래와 같이 나온다.   
+
+ssl | version | cipher
+| --- | --- | --- |
+t | TLSv1.3 | TLS_AES_256_GCM_SHA384
+
+
+SSL 강제가 동작하는지 확인하려면 `PGSSLMODE=disable` 로 시도한다.
+```bash
+FATAL: no pg_hba.conf entry for host "10.20.12.20", user "logssey_admin",
+database "reused", no encryption
+```
+
+
+거부 사유가 `no encryption` 이면 `rds.force_ssl` 이 동작하는 것이다.
+
+출발지가 노드 IP(`10.20.12.20`)로 기록되는 것은 Overlay CNI 에서
+Pod 트래픽이 노드 ENI 로 SNAT 되기 때문이다. `docs/02-security.md` 의
+"알려진 한계" 참조.
+
 
 ---
 

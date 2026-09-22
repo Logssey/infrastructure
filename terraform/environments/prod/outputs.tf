@@ -74,3 +74,33 @@ output "route53_zone_id" {
   description = "Route53 레코드 추가 시 참조한다."
   value       = module.edge.zone_id
 }
+
+output "rds_endpoint" {
+  description = "DB 엔드포인트 (host:port)"
+  value       = module.rds.endpoint
+}
+
+output "rds_address" {
+  description = "DB 호스트 주소"
+  value       = module.rds.address
+}
+
+output "rds_instance_id" {
+  value = module.rds.instance_id
+}
+
+output "rds_parameter_group_name" {
+  value = module.rds.parameter_group_name
+}
+
+output "rds_master_user_secret_arn" {
+  description = <<-EOT
+    마스터 비밀번호가 저장된 Secrets Manager 시크릿 ARN.
+
+    조회:
+      aws secretsmanager get-secret-value \
+        --secret-id $(terraform output -raw rds_master_user_secret_arn) \
+        --region ap-northeast-1 --query 'SecretString' --output text
+  EOT
+  value       = module.rds.master_user_secret_arn
+}
