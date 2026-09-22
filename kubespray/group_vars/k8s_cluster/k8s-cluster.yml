@@ -26,3 +26,26 @@ kube_version: 1.35.4
 # ─────────────────────────────────────────────
 
 kube_proxy_remove: true
+
+# ─────────────────────────────────────────────
+# kubelet serving certificate
+#
+# 기본값(false)에서는 kubelet 이 self-signed 인증서를 사용해
+# metrics-server 가 TLS 검증에 실패한다.
+# true 로 설정하면 kubelet 이 클러스터 CA 에 CSR 을 요청하고,
+# kubelet-csr-approver 가 자동 설치되어 승인을 처리한다.
+#
+# --kubelet-insecure-tls 없이 metrics-server 를 운영하기 위함이다.
+# ─────────────────────────────────────────────
+
+kubelet_rotate_server_certificates: true
+
+# approver 는 기본적으로 노드 DNS 이름 해석을 검증하나,
+# 본 환경의 노드명(cp-a 등)은 DNS 에 등록되어 있지 않다.
+# DNS 검증을 끄는 대신 호스트명 정규식과 IP 대역으로 제한한다.
+kubelet_csr_approver_values:
+  providerRegex: "^(cp|worker)-[acd]$"
+  providerIpPrefixes:
+    - "10.20.0.0/16"
+  bypassDnsResolution: true
+  maxExpirationSeconds: "86400"

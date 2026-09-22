@@ -214,6 +214,13 @@ ansible -i inventory/logssey/inventory.ini k8s_cluster -m shell -b \
   -a "iptables-save | grep -v KUBE- | iptables-restore; ipvsadm -C 2>/dev/null"
 ```
 
+> **이 명령은 사용하지 않는다.**
+> 테이블 전체를 다시 적재하는 과정에서 Cilium 규칙의 참조 관계가 어긋나
+> L7 정책이 동작하지 않게 되었다. 증상은 12시간 뒤 connectivity test 에서
+> 드러났다. 상세는 [07](07-iptables-corruption-l7.md) 참조.
+>
+> kube-proxy 규칙 제거가 필요하면 노드를 재부팅한다.
+
 `cluster.yml` 재실행 후 확인.
 
 ```bash

@@ -67,18 +67,45 @@ ansible-playbook -i inventory/logssey/inventory.ini cluster.yml -b
 
 ## 실행 후 필수 작업
 
-**`/opt/cni/bin` 소유자를 root 로 변경한다.**
+`cluster.yml` 을 실행할 때마다 아래 두 가지가 되돌아간다.
+Ansible 은 선언한 상태로 수렴시키므로 수동 변경은 유지되지 않는다.
+
+### 1. /opt/cni/bin 소유자 변경
 
 Kubespray 는 이 디렉터리를 `kube:root` 로 설정하나, Cilium 의
 `mount-cgroup` init 컨테이너가 `DAC_OVERRIDE` 없이 root 로 실행되어
-파일 쓰기가 거부된다. `cluster.yml` 을 돌릴 때마다 되돌아가므로
-매번 수행해야 한다.
+파일 쓰기가 거부된다.
 
 ```bash
 ansible -i inventory/logssey/inventory.ini k8s_cluster -m shell -b \
   -a "chown root:root /opt/cni/bin"
 
 kubectl -n kube-system delete pods -l k8s-app=cilium
+```
+
+상세는 `docs/troubleshooting/03-cilium-cni-bin-permission.md` 참조.
+
+### 2. cilium CLI 재설치
+
+Kubespray 가 고정한 버전(v0.18.9)이 클러스터의 Cilium(1.19.3)보다 낮다.
+`connectivity test` 실행 시 일부 항목이 빠지고 API deprecated 경고가 출력된다.
+
+Kubespray 변수(`cilium_cli_version`)로 올리려면 checksum 도 함께
+등록해야 하므로, 바이너리를 직접 교체한다.
+
+```bash
+CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+CLI_ARCH=amd64
+
+cd /tmp
+curl -L --fail --remote-name-all \
+  https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
+sha256sum --check cilium-linux-${CLI_ARCH}.tar.gz.sha256sum
+
+sudo tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
+rm cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
+
+cilium version
 ```
 
 ## 검증
