@@ -1,0 +1,27 @@
+# AWS EBS CSI Driver
+#
+# 차트   aws-ebs-csi-driver/aws-ebs-csi-driver 2.66.0 (app 1.66.0)
+# 저장소 https://kubernetes-sigs.github.io/aws-ebs-csi-driver
+# 설치   kube-system
+#
+# 권한은 노드 IAM Role 의 AmazonEBSCSIDriverPolicy 를 사용한다.
+# self-managed 클러스터에는 IRSA 가 없어 IMDS 경유로 자격증명을 얻는다.
+#
+# controller 의 region 은 비워두면 EC2 메타데이터로 자동 감지한다.
+# replicaCount 2, podAntiAffinity, priorityClassName 은 차트 기본값을 사용한다.
+
+storageClasses:
+  - name: gp3
+    annotations:
+      storageclass.kubernetes.io/is-default-class: "true"
+    # Pod 가 스케줄된 AZ 에 볼륨을 생성한다.
+    # Immediate 로 두면 임의 AZ 에 생성되어 Pod 와 어긋날 수 있다.
+    # EBS 는 AZ 를 넘어 연결할 수 없다.
+    volumeBindingMode: WaitForFirstConsumer
+    reclaimPolicy: Delete
+    allowVolumeExpansion: true
+    parameters:
+      type: gp3
+      # EBS 암호화. 생성 후 변경할 수 없다.
+      encrypted: "true"
+      csi.storage.k8s.io/fstype: ext4

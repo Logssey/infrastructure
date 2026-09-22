@@ -11,18 +11,24 @@
 | [03](03-cilium-cni-bin-permission.md) | Cilium mount-cgroup 실패 | `/opt/cni/bin` 소유자, `DAC_OVERRIDE` 없음 | Cilium 기동 |
 | [04](04-kube-proxy-ipvs-conflict.md) | Service 접속 불가 (병행 구성) | kube-proxy IPVS ↔ Cilium eBPF 충돌 | 클러스터 기동 후 |
 | [05](05-apiserver-sg-kpr.md) | Service 접속 불가 (replacement) | SG — Worker → CP 6443 누락 | kube-proxy replacement 전환 후 |
+| [06](06-kubelet-api-sg.md) | kubelet API 접근 불가 | SG — CP 10250 누락 | connectivity test |
+| [07](07-iptables-corruption-l7.md) | L7 NetworkPolicy 미동작 | iptables 직접 조작으로 Cilium 상태 손상 | connectivity test |
 
 04와 05는 같은 증상의 서로 다른 원인이다. 04를 해결한 뒤에도 증상이 남아 05로 이어졌다.
+
+**07은 04의 조치가 원인이었다.** kube-proxy 규칙을 제거하려고 iptables 를 직접
+조작한 것이 Cilium 상태를 손상시켰고, 증상은 connectivity test 에서 드러났다.
 
 ## 분류
 
 | 유형 | 건수 | 해당 |
 | --- | --- | --- |
-| Security Group 설계 누락 | 3 | 02, 05(2건) |
+| Security Group 설계 누락 | 6 | 02, 05(2건), 06(2건), 05의 ICMP |
 | Kubespray 동작 특성 | 2 | 01, 04 |
 | 환경 전제 불일치 | 1 | 03 |
+| 조치가 만든 2차 문제 | 1 | 07 |
 
-**SG 관련이 절반이다.** 설계 시 정의한 통신 경로가 실제 도구의 동작과 달랐던 경우다.
+**SG 관련이 가장 많다.** 설계 시 정의한 통신 경로가 실제 도구의 동작과 달랐던 경우다.
 
 ## 설계 변경으로 이어진 항목
 
@@ -31,6 +37,7 @@
 | kube-proxy replacement | 미적용 | 적용 |
 | etcd 2379 접근 | Control Plane만 | + 멤버 간 |
 | apiserver 접근 경로 | Internal NLB 경유 | + Worker → CP 직접 |
+| kubelet API 10250 | CP → Worker만 | + CP 간, Worker → CP |
 | 노드 간 ICMP | 미허용 | 허용 |
 
 ## 진단 참고
@@ -100,6 +107,48 @@ ansible -i <inventory> <host> -m shell -b \
 **ICMP 가 SG에서 막힌 환경에서는 2번이 항상 실패**하므로 주의한다.
 SSH·Ansible 이 동작하는데 ping 이 전부 실패하면 ICMP 차단을 의심한다.
 
+### 로그 시점 구분
+
+`--tail` 은 시간과 무관하게 마지막 N줄을 보여준다. 재부팅이나 Pod 재시작
+직후에는 과거 로그가 잡히므로 `--since` 를 함께 쓴다.
+
+```bash
+kubectl -n <ns> logs <pod> --since=30s | grep -c "<에러 문자열>"
+```
+
+`0` 이면 최근 30초간 해당 에러가 없다는 뜻이다.
+
+### 구성 변경 후 검증
+
+Cilium 구성이나 노드 상태를 바꾼 뒤에는 기본 통신 확인만으로 부족하다.
+L7 정책처럼 평소에 쓰지 않는 경로는 깨져 있어도 드러나지 않는다.
+
+```bash
+cilium connectivity test 2>&1 | tee /tmp/test.log
+```
+
+20분 소요. 결과 요약은 아래로 확인한다.
+
+```bash
+grep -E "tests failed|tests successful" /tmp/test.log | tail -3
+grep "🟥" /tmp/test.log | grep -v "check-log-errors" | head -20
+```
+
+**현재 환경에서 예상되는 실패 2건.**
+
+| 항목 | 사유 |
+| --- | --- |
+| `pod-to-hostport` | SG 에 hostPort 4000 없음. 사용하지 않는 기능 |
+| `check-log-errors` | 재부팅 직후 restart count 와 과거 로그를 검출 |
+
+cilium CLI 버전이 클러스터보다 낮으면 `v2alpha1 deprecated` 경고가 출력되고
+일부 테스트 항목이 빠진다. CLI 를 클러스터 버전 이상으로 맞춘다.
+
+```bash
+curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt
+cilium version
+```
+
 ## 작성 형식
 
 새 문서는 아래 구조를 따른다.
@@ -114,8 +163,10 @@ SSH·Ansible 이 동작하는데 ping 이 전부 실패하면 ICMP 차단을 의
 ## 원인          왜 발생했는지
 ## 해결          실제 조치
 ## 재발 방지      설정 변경 / 절차 추가
-## 교훈          일반화할 수 있는 내용
 ## 참고          관련 파일 경로
 ```
 
-**오판한 과정도 남긴다.** 
+**오판한 과정도 남긴다.** 결론만 있으면 다음에 같은 함정에 빠진다.
+
+일반화할 수 있는 내용이 있으면 `## 교훈` 을 추가한다.
+진단 과정과 재발 방지에 이미 담겨 있다면 생략한다.

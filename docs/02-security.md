@@ -58,6 +58,9 @@ SG 규칙 단위 태그는 provider 5.x에서 도입된 기능이며 `descriptio
 | 6 | sg-etcd | sg-etcd | TCP 2380 | etcd peer (Raft) |
 | 6-b | sg-etcd | sg-etcd | TCP 2379 | etcd client between members |
 | 7 | sg-control-plane | sg-worker | TCP 10250 | kubelet API |
+| 7-b | sg-control-plane | sg-control-plane | TCP 10250 | kubelet API (CP 간) |
+| 7-c | sg-worker | sg-control-plane | TCP 10250 | kubelet API (Worker → CP) |
+| 7-d | sg-worker | sg-worker | TCP 10250 | kubelet API (Worker 간) |
 | 8 | sg-k8s-node | sg-k8s-node | UDP 8472 | Cilium VXLAN 터널 |
 | 9 | sg-k8s-node | sg-k8s-node | TCP 4240 | Cilium agent health check |
 | 9-b | sg-k8s-node | sg-k8s-node | ICMP | Cilium health 노드 프로브 |
@@ -71,6 +74,18 @@ SG 규칙 단위 태그는 provider 5.x에서 도입된 기능이며 `descriptio
   kubectl은 Worker에, Kubespray는 Control Plane 1번 노드에 SSM으로 접속해 실행한다.
 - 12번 SSH 규칙은 구축 완료 후 제거를 검토한다. 노드 간 횡방향 이동 경로가 된다.
 
+### kubelet API(10250) 경로
+
+포트 하나에 대해 출발지와 목적지 조합을 모두 확인한다.
+방향별로 규칙이 필요하며, 한 방향이 열려 있다고 다른 방향이 되는 것은 아니다.
+
+| 출발지 \ 목적지 | Control Plane | Worker |
+| --- | --- | --- |
+| **Control Plane** | 7-b | 7 |
+| **Worker** | 7-c | 7-d |
+
+etcd 노드는 Kubernetes 노드가 아니므로 kubelet 이 동작하지 않는다.
+
 ### 구축 중 추가한 규칙
 
 설계 시 정의한 통신 경로가 실제 도구의 동작과 달라 구축 중 추가한 항목이다.
@@ -81,6 +96,8 @@ SG 규칙 단위 태그는 provider 5.x에서 도입된 기능이며 `descriptio
 | 6-b | Kubespray의 `etcdctl endpoint health --cluster` 체크가 etcd 노드에서 다른 멤버의 클라이언트 포트로 접속한다. peer 포트(2380)는 Raft 전용이라 이 경로를 대체하지 않는다. | [02](troubleshooting/02-etcd-client-sg.md) |
 | 4-b, 4-c | Cilium kube-proxy replacement 사용 시 eBPF가 Service IP를 백엔드(CP 노드의 6443)로 직접 변환한다. Internal NLB를 거치지 않으므로 직접 경로가 필요하다. | [05](troubleshooting/05-apiserver-sg-kpr.md) |
 | 9-b | `cilium-health`의 노드 간 프로브가 ICMP를 사용한다. 없으면 `Cluster health`가 1/N reachable로 표시되어 다른 문제 진단 시 혼선을 준다. | [05](troubleshooting/05-apiserver-sg-kpr.md) |
+| 7-b, 7-c | `kubectl exec`·`logs`·`top` 과 apiserver 의 Pod 접근이 kubelet API(10250)를 사용한다. 설계 시 CP → Worker 방향만 정의했다. | [06](troubleshooting/06-kubelet-api-sg.md) |
+| 7-d | metrics-server 가 워커에 배치되면 다른 워커와 자기 자신의 kubelet 을 조회한다. 7-b·7-c 추가 시 Worker 간 경로를 함께 검토하지 못해 뒤늦게 발견했다. | [06](troubleshooting/06-kubelet-api-sg.md) |
 
 **4-b와 4-c는 CNI 설정에 따라 필요 여부가 달라진다.**
 kube-proxy replacement를 끄면 트래픽이 Internal NLB를 경유하므로 불필요하다.

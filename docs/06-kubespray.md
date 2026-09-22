@@ -78,6 +78,15 @@ kube_pods_subnet: 10.244.0.0/16      # 기본값 10.233.64.0/18 에서 변경
 kube_service_addresses: 10.96.0.0/16 # 기본값 10.233.0.0/18 에서 변경
 
 kube_proxy_remove: true              # kube-proxy replacement 사용
+
+kubelet_rotate_server_certificates: true
+
+kubelet_csr_approver_values:
+  providerRegex: "^(cp|worker)-[acd]$"
+  providerIpPrefixes:
+    - "10.20.0.0/16"
+  bypassDnsResolution: true
+  maxExpirationSeconds: "86400"
 ```
 
 **Pod/Service CIDR을 명시적으로 지정한다.**
@@ -87,6 +96,23 @@ Kubespray 기본값(`10.233.x`)은 VPC 대역(`10.20.0.0/16`)과 겹치지 않�
 
 `cilium_kube_proxy_replacement: true`만으로도 Kubespray가 `addon/kube-proxy`를
 건너뛰지만 의도를 명확히 하기 위해 함께 지정한다.
+
+#### kubelet serving certificate
+
+기본값에서는 kubelet이 self-signed 인증서를 사용한다.
+metrics-server처럼 kubelet API를 호출하는 컴포넌트가 TLS 검증에 실패하며,
+`--kubelet-insecure-tls`로 검증을 끄는 것은 공식 문서상 테스트 용도다.
+
+`kubelet_rotate_server_certificates: true`를 켜면 kubelet이 클러스터 CA에
+CSR을 요청하고, Kubespray가 kubelet-csr-approver를 자동 설치해 승인을 처리한다.
+`kubelet_csr_approver_enabled`의 기본값이 이 변수를 따른다.
+
+approver는 노드 DNS 이름 해석을 검증하나 본 환경의 노드명은 DNS에 없다.
+DNS 검증을 끄는 대신 호스트명 정규식과 VPC IP 대역으로 승인 범위를 제한한다.
+**`providerRegex`는 반드시 지정해야 하며, 비워두면 모든 CSR이 거부된다.**
+
+발급된 인증서의 SAN에는 노드명과 IP가 모두 포함되어
+어느 주소로 접근하든 검증이 통과한다.
 
 ### group_vars/k8s_cluster/k8s-net-cilium.yml
 
@@ -289,12 +315,13 @@ etcd 인증서 생성이 누락될 수 있다.
 
 ### 8. 실행 후 필수 작업
 
+`cluster.yml`을 실행할 때마다 되돌아가는 항목이 두 가지 있다.
+Ansible은 선언한 상태로 수렴시키므로 수동 변경이 유지되지 않는다.
+
 **`/opt/cni/bin` 소유자를 root로 변경한다.**
 
 Kubespray는 이 디렉터리를 `kube:root`로 설정하나, Cilium의 `mount-cgroup`
 init 컨테이너가 `DAC_OVERRIDE` 없이 root로 실행되어 파일 쓰기가 거부된다.
-
-**`cluster.yml`을 실행할 때마다 되돌아가므로 매번 수행해야 한다.**
 
 ```bash
 ansible -i inventory/logssey/inventory.ini k8s_cluster -m shell -b \
@@ -303,7 +330,11 @@ ansible -i inventory/logssey/inventory.ini k8s_cluster -m shell -b \
 kubectl -n kube-system delete pods -l k8s-app=cilium
 ```
 
-상세는 [troubleshooting/03](troubleshooting/03-cilium-cni-bin-permission.md) 참조.
+**cilium CLI를 재설치한다.**
+
+Kubespray가 고정한 버전이 클러스터의 Cilium보다 낮아 진단 도구로 쓰기 어렵다.
+
+상세 절차는 `kubespray/README.md` 참조.
 
 ---
 
@@ -325,6 +356,7 @@ kubectl get pods -A
 | CoreDNS | 2개 Running (1/1) |
 | cilium | DaemonSet 전 노드 Running |
 | hubble-relay | Running (1/1) |
+| kubelet-csr-approver | 2개 Running |
 | kube-proxy | **없음** (replacement 사용) |
 
 **etcd 전용 노드는 `kubectl get nodes`에 나타나지 않는다.**
@@ -358,6 +390,34 @@ Control Plane 3대가 백엔드로 등록되어야 한다.
 CID=$(sudo crictl ps --name cilium-agent -q | head -1)
 sudo crictl exec $CID cilium-dbg status --brief
 ```
+
+### kubelet serving certificate
+
+```bash
+kubectl get csr
+```
+
+노드 6대의 CSR이 `Approved,Issued` 여야 한다.
+
+```bash
+kubectl -n kube-system get pods | grep csr-approver
+kubectl -n kube-system logs -l app.kubernetes.io/name=kubelet-csr-approver --tail=20
+```
+
+승인 로그(`CSR approved`)가 노드 수만큼 보여야 한다.
+
+```bash
+ansible -i inventory/logssey/inventory.ini cp-a -m shell -b \
+  -a "openssl x509 -in /var/lib/kubelet/pki/kubelet-server-current.pem \
+      -noout -issuer -subject -ext subjectAltName"
+```
+
+| 항목 | 기대값 |
+| --- | --- |
+| issuer | `CN = kubernetes` (클러스터 CA) |
+| SAN | `DNS:cp-a, IP Address:10.20.10.10` |
+
+self-signed인 경우 issuer가 `CN = cp-a-ca@...` 형태로 나타난다.
 
 ### DNS
 
@@ -395,11 +455,23 @@ aws elbv2 describe-target-health \
   --output table
 ```
 
+### 네트워크 전체 검증
+
+구성 변경 후에는 `cilium connectivity test`로 확인한다.
+기본 통신만 보면 L7 정책처럼 평소에 쓰지 않는 경로의 이상을 놓친다.
+
+```bash
+cilium connectivity test 2>&1 | tee /tmp/test.log
+```
+
+20분 소요. 예상되는 실패 2건은
+[troubleshooting/README](troubleshooting/) 참조.
+
 ---
 
 ## 구축 중 발생한 이슈
 
-5건 발생했다. 상세는 [troubleshooting](troubleshooting/) 참조.
+7건 발생했다. 상세는 [troubleshooting](troubleshooting/) 참조.
 
 | # | 문제 | 원인 |
 | --- | --- | --- |
@@ -408,8 +480,11 @@ aws elbv2 describe-target-health \
 | [03](troubleshooting/03-cilium-cni-bin-permission.md) | Cilium mount-cgroup 실패 | `/opt/cni/bin` 소유자 |
 | [04](troubleshooting/04-kube-proxy-ipvs-conflict.md) | Service 접속 불가 | kube-proxy IPVS ↔ eBPF 충돌 |
 | [05](troubleshooting/05-apiserver-sg-kpr.md) | Service 접속 불가 (재발) | SG — Worker → CP 6443 누락 |
+| [06](troubleshooting/06-kubelet-api-sg.md) | kubelet API 접근 불가 | SG — 10250 방향 누락 |
+| [07](troubleshooting/07-iptables-corruption-l7.md) | L7 정책 미동작 | iptables 직접 조작으로 Cilium 상태 손상 |
 
-이 중 03은 `cluster.yml` 재실행마다 재현되므로 "실행 후 필수 작업"으로 절차화했다.
+03은 `cluster.yml` 재실행마다 재현되므로 "실행 후 필수 작업"으로 절차화했다.
+07은 04의 조치가 원인이었으며 노드 재부팅으로 해결했다.
 
 ## 제거된 변수 (구버전 예제 주의)
 
@@ -432,6 +507,9 @@ Kubespray는 멱등성을 가지므로 이미 완료된 단계는 건너뛴다.
 | etcd 헬스체크 실패 | SG 2379 멤버 간 ([02](troubleshooting/02-etcd-client-sg.md)) |
 | 노드가 NotReady | Cilium Pod 상태, `/opt/cni/bin` 소유자 ([03](troubleshooting/03-cilium-cni-bin-permission.md)) |
 | CoreDNS가 Ready 안 됨 | Service IP 접속 경로, SG 6443 ([05](troubleshooting/05-apiserver-sg-kpr.md)) |
+| `kubectl exec`·`logs` 실패 | SG 10250 방향 ([06](troubleshooting/06-kubelet-api-sg.md)) |
+| L7 정책만 동작 안 함 | iptables 재조정 실패 ([07](troubleshooting/07-iptables-corruption-l7.md)) |
+| CSR이 Pending | `providerRegex` 와 노드명 일치 여부 |
 | apiserver 간헐 타임아웃 | **NLB Client IP Preservation** |
 | Pod가 IP를 못 받음 | Pod CIDR 충돌 |
 
