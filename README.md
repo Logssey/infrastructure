@@ -44,6 +44,9 @@ terraform plan -target=module.network
 # 보안 모드 전환 (개방 규칙 제거)
 terraform apply -var="security_mode=strict"
 
+# 특정 인스턴스만 재생성
+terraform apply -replace='module.compute.aws_instance.worker[0]'
+
 # 관리 중인 리소스 목록
 terraform state list
 
@@ -56,11 +59,26 @@ terraform output -raw internal_api_dns_name
 
 인바운드 포트를 열지 않으므로 SSM Session Manager로만 접속한다.
 
+인스턴스 ID는 `terraform output`으로 확인한다.
+
 ```bash
-CP_A=$(aws ec2 describe-instances \
-  --filters "Name=tag:Name,Values=logssey-prod-cp-a" "Name=instance-state-name,Values=running" \
-  --region ap-northeast-1 \
-  --query 'Reservations[0].Instances[0].InstanceId' --output text)
+cd terraform/environments/prod
+
+terraform output control_plane_instance_ids
+terraform output worker_instance_ids
+terraform output etcd_instance_ids
+terraform output redis_instance_id
+```
+
+```bash
+aws ssm start-session --target <INSTANCE_ID> --region ap-northeast-1
+```
+
+cp-a 에 바로 접속하려면
+
+```bash
+CP_A=$(terraform output -json control_plane_instance_ids \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)[0])')
 
 aws ssm start-session --target $CP_A --region ap-northeast-1
 ```
@@ -121,6 +139,10 @@ AWS 실제 상태      지금 이렇게 되어 있다
 DynamoDB 잠금 테이블은 사용하지 않는다.
 `dynamodb_table` 인자는 deprecated이며, Terraform 1.10부터 지원되는
 S3 조건부 쓰기 기반 `use_lockfile = true`를 사용한다.
+
+**상태 파일에는 RDS·Redis 비밀번호가 평문으로 저장된다.**
+노드 IAM Role 에 이 버킷에 대한 명시적 Deny 정책을 부착해
+EC2 에서 접근할 수 없도록 한다. `docs/03-iam.md` 참조.
 
 ### 잠금 동작
 
@@ -197,6 +219,36 @@ dev/terraform.tfstate.tflock    -> dev 는 동시 실행 가능
 
 ---
 
+## 태그 정책
+
+provider 의 `default_tags` 로 모든 리소스에 자동 부착한다.
+
+| 키 | 값 | 용도 |
+| --- | --- | --- |
+| Project | logssey | 프로젝트 식별 |
+| Environment | prod | 환경 구분 |
+| ManagedBy | terraform | 수동 생성 리소스와 구분 |
+| Owner | tfvars 에서 지정 | 책임자 추적 |
+
+리소스별로는 `Name` 태그만 추가한다.
+
+**`default_tags` 와 같은 키를 리소스에서 다시 지정하면**
+Terraform 이 매번 변경으로 감지해 plan 에 계속 나타난다.
+리소스 태그는 여기와 겹치지 않는 키만 사용한다.
+
+SG 개방 규칙에는 `Tier = T2-remove` 태그를 추가로 부착한다.
+제거 대상을 콘솔과 CLI 에서 식별하기 위함이다. `docs/02-security.md` 참조.
+
+태그로 리소스를 조회할 수 있다.
+
+```bash
+aws ec2 describe-instances \
+  --filters "Name=tag:Project,Values=logssey" \
+  --region ap-northeast-1
+```
+
+---
+
 ## 보안 모드
 
 1차 구축과 조치 완료 상태를 변수 하나로 전환한다.
@@ -209,6 +261,10 @@ dev/terraform.tfstate.tflock    -> dev 는 동시 실행 가능
 ```bash
 terraform apply -var="security_mode=strict"
 ```
+
+**permissive 상태에서는 체인 규칙이 맞는지 검증할 수 없다.**
+개방 규칙이 대부분의 트래픽을 통과시키므로 누락이 있어도 드러나지 않는다.
+strict 전환 후 주요 경로 점검이 필요하다.
 
 상세는 `docs/02-security.md`, `docs/03-iam.md` 참조.
 
@@ -223,6 +279,8 @@ terraform apply -var="security_mode=strict"
 | Kubernetes | 1.35.4 (Kubespray v2.31.0) |
 | CNI | Cilium 1.19.3 (VXLAN, kube-proxy replacement) |
 | Ingress | Envoy Gateway v1.9.1 (Gateway API v1.6.1) |
+| 스토리지 | AWS EBS CSI Driver (gp3 기본 StorageClass) |
+| 메트릭 | metrics-server |
 | 도메인 | re-used.store |
 
 ## 디렉터리
@@ -236,8 +294,10 @@ terraform/
     iam/                IAM Role, 인스턴스 프로파일
     compute/            EC2, user_data
     lb/                 Internal NLB, Public NLB
-    edge/               Route53, CloudFront, ACM
+    edge/               Route53 Hosted Zone
 kubespray/              클러스터 인벤토리 및 변수
+k8s/
+  platform/             애드온 Helm values, 매니페스트
 docs/                   구현 명세
   troubleshooting/      구축 중 문제 해결 기록
 ```
@@ -248,9 +308,11 @@ docs/                   구현 명세
 | --- | --- |
 | [01-network.md](docs/01-network.md) | VPC, 서브넷 CIDR, 라우팅 |
 | [02-security.md](docs/02-security.md) | Security Group 체인, 개방 규칙 |
-| [03-iam.md](docs/03-iam.md) | IAM Role, 최소 권한 계획 |
+| [03-iam.md](docs/03-iam.md) | IAM Role, IMDS, 최소 권한 계획 |
 | [04-compute.md](docs/04-compute.md) | 노드 스펙, 사설 IP, user_data |
 | [05-loadbalancer.md](docs/05-loadbalancer.md) | NLB 구성, Client IP Preservation |
 | [06-kubespray.md](docs/06-kubespray.md) | 클러스터 구축, Cilium 설정 |
 | [07-ingress.md](docs/07-ingress.md) | 진입 경로, Envoy Gateway, NodePort 고정 |
+| [k8s/README.md](k8s/README.md) | 애드온 설치 절차와 검증 |
+| [kubespray/README.md](kubespray/README.md) | 인벤토리 반영 절차 |
 | [troubleshooting/](docs/troubleshooting/) | 구축 중 발생한 문제와 해결 과정 |

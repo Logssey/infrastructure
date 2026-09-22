@@ -79,6 +79,28 @@ variable "private_data_subnet_cidrs" {
 }
 
 # ─────────────────────────────────────────────
+# Envoy Gateway NodePort
+# ─────────────────────────────────────────────
+
+variable "envoy_node_port" {
+  description = <<-EOT
+    Envoy Gateway 가 사용하는 NodePort.
+    Public NLB 타겟 그룹과 SG 2번 규칙이 이 값을 공유한다.
+
+    Kubernetes 쪽은 Terraform 이 관리하지 않으므로
+    k8s/platform/envoy-gateway/envoyproxy.yaml 의 nodePort 에
+    같은 값을 수동으로 맞춰야 한다.
+  EOT
+  type        = number
+  default     = 30080
+
+  validation {
+    condition     = var.envoy_node_port >= 30000 && var.envoy_node_port <= 32767
+    error_message = "NodePort 는 30000-32767 범위여야 한다."
+  }
+}
+
+# ─────────────────────────────────────────────
 # 보안 모드
 # ─────────────────────────────────────────────
 

@@ -269,6 +269,10 @@ iptables 와 eBPF 중 어느 쪽이 패킷을 처리하는지 추적하는 데 �
 - 신규 클러스터는 처음부터 replacement 로 구성되므로 kube-proxy 수동 제거 불필요
 - `docs/06-kubespray.md` 의 Cilium 설정 절에 반영
 
+`kube_proxy_remove` 는 `kubeadm_init_phases_skip` 조건문에서
+`cilium_kube_proxy_replacement` 분기가 먼저 평가되므로 현재 구성에서는 도달하지 않는다.
+replacement 를 끄는 경우를 대비한 fallback 이다. `docs/06-kubespray.md` 참조.
+
 ## 교훈
 
 **Kubespray 기본값이 CNI 선택과 맞지 않을 수 있다.**

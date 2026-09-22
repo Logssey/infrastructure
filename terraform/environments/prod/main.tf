@@ -20,9 +20,10 @@ module "network" {
 module "security" {
   source = "../../modules/security"
 
-  name_prefix   = local.name_prefix
-  vpc_id        = module.network.vpc_id
-  security_mode = var.security_mode
+  name_prefix     = local.name_prefix
+  vpc_id          = module.network.vpc_id
+  security_mode   = var.security_mode
+  envoy_node_port = var.envoy_node_port
 }
 
 module "iam" {
@@ -76,4 +77,6 @@ module "lb" {
 
   control_plane_instance_ids = module.compute.control_plane_instance_ids
   worker_instance_ids        = module.compute.worker_instance_ids
+
+  envoy_node_port = var.envoy_node_port
 }

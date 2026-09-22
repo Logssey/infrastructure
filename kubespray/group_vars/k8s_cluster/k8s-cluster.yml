@@ -21,8 +21,9 @@ kube_version: 1.35.4
 # Cilium kube-proxy replacement 사용 시 kube-proxy 를 제거한다.
 # 병행하면 iptables/IPVS 규칙과 eBPF 가 같은 Service 를 처리하며 충돌한다.
 #
-# cilium_kube_proxy_replacement: true 만으로도 Kubespray 가
-# addon/kube-proxy 를 건너뛰나, 명시적으로 지정한다.
+# kubeadm_init_phases_skip 조건문에서 cilium_kube_proxy_replacement 가
+# 먼저 평가되므로 현재 구성에서 이 변수는 실제로 도달하지 않는다.
+# replacement 를 끄는 경우를 대비한 fallback 으로 남긴다.
 # ─────────────────────────────────────────────
 
 kube_proxy_remove: true
