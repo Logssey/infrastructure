@@ -222,7 +222,7 @@ terraform apply -var="security_mode=strict"
 | IaC | Terraform |
 | Kubernetes | 1.35.4 (Kubespray v2.31.0) |
 | CNI | Cilium 1.19.3 (VXLAN, kube-proxy replacement) |
-| Ingress | Envoy Gateway |
+| Ingress | Envoy Gateway v1.9.1 (Gateway API v1.6.1) |
 | 도메인 | re-used.store |
 
 ## 디렉터리
@@ -252,4 +252,5 @@ docs/                   구현 명세
 | [04-compute.md](docs/04-compute.md) | 노드 스펙, 사설 IP, user_data |
 | [05-loadbalancer.md](docs/05-loadbalancer.md) | NLB 구성, Client IP Preservation |
 | [06-kubespray.md](docs/06-kubespray.md) | 클러스터 구축, Cilium 설정 |
+| [07-ingress.md](docs/07-ingress.md) | 진입 경로, Envoy Gateway, NodePort 고정 |
 | [troubleshooting/](docs/troubleshooting/) | 구축 중 발생한 문제와 해결 과정 |
