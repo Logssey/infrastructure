@@ -80,9 +80,7 @@ resource "aws_lb_listener" "internal_api" {
 #
 # CloudFront → Public NLB → Worker Node : Envoy NodePort
 #
-# 현재는 TCP 80 리스너만 구성되어 있다.
-# TLS 443 리스너는 ACM 인증서 발급 후 추가한다.
-# 리스너 추가는 NLB 재생성을 유발하지 않는다.
+# TLS 443 리스너 하나만 둔다. HTTP 80 은 사용하지 않는다.
 # ─────────────────────────────────────────────
 
 resource "aws_lb" "public" {
@@ -137,10 +135,26 @@ resource "aws_lb_target_group_attachment" "public" {
   port             = var.envoy_node_port
 }
 
-resource "aws_lb_listener" "public_tcp" {
+# ─────────────────────────────────────────────
+# Public NLB 리스너 — TLS 443
+#
+# HTTP 80 리스너는 두지 않는다.
+# CloudFront 가 redirect-to-https 로 클라이언트의 HTTP 요청을 처리하므로
+# CloudFront → NLB 구간은 항상 HTTPS 다.
+#
+# NLB 는 L4 라 리다이렉트를 할 수 없다. ALB 의 기능이다.
+#
+# TLS 는 여기서 종단되고 Envoy 에는 평문으로 전달된다.
+# NLB → Worker 구간은 VPC 내부다.
+# ─────────────────────────────────────────────
+
+resource "aws_lb_listener" "public_tls" {
   load_balancer_arn = aws_lb.public.arn
-  port              = 80
-  protocol          = "TCP"
+  port              = 443
+  protocol          = "TLS"
+
+  certificate_arn = var.origin_certificate_arn
+  ssl_policy      = var.nlb_ssl_policy
 
   default_action {
     type             = "forward"

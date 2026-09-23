@@ -4,7 +4,8 @@
 # 도메인은 외부 등록기관(가비아)에서 구매했으므로
 # Hosted Zone 생성 후 NS 레코드 4개를 등록기관에 등록해야 한다.
 #
-# CloudFront, ACM, 레코드는 추후 추가한다.
+# ACM 인증서와 검증 레코드는 acm.tf 에 있다.
+# 서비스 레코드(apex, www, origin)는 edge 모듈에서 생성한다.
 # ─────────────────────────────────────────────
 
 resource "aws_route53_zone" "main" {

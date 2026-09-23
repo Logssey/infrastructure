@@ -28,7 +28,7 @@ output "ami_id" {
 
 output "route53_name_servers" {
   description = "도메인 등록기관에 입력할 NS 레코드"
-  value       = module.edge.name_servers
+  value       = module.dns.name_servers
 }
 
 output "internal_api_dns_name" {
@@ -72,7 +72,7 @@ output "vpc_id" {
 
 output "route53_zone_id" {
   description = "Route53 레코드 추가 시 참조한다."
-  value       = module.edge.zone_id
+  value       = module.dns.zone_id
 }
 
 output "rds_endpoint" {
@@ -103,4 +103,45 @@ output "rds_master_user_secret_arn" {
         --region ap-northeast-1 --query 'SecretString' --output text
   EOT
   value       = module.rds.master_user_secret_arn
+}
+
+output "cloudfront_certificate_arn" {
+  description = "CloudFront 용 ACM 인증서 ARN (us-east-1)"
+  value       = module.dns.cloudfront_certificate_arn
+}
+
+output "origin_certificate_arn" {
+  description = "Public NLB TLS 리스너용 ACM 인증서 ARN (ap-northeast-1)"
+  value       = module.dns.origin_certificate_arn
+}
+
+output "public_nlb_arn" {
+  value = module.lb.public_nlb_arn
+}
+
+output "public_nlb_zone_id" {
+  description = "Route53 alias 레코드 생성에 필요하다."
+  value       = module.lb.public_nlb_zone_id
+}
+
+output "cloudfront_distribution_id" {
+  description = <<-EOT
+    CloudFront Distribution ID.
+
+    캐시 무효화:
+      aws cloudfront create-invalidation \
+        --distribution-id $(terraform output -raw cloudfront_distribution_id) \
+        --paths "/*"
+  EOT
+  value       = module.edge.cloudfront_distribution_id
+}
+
+output "cloudfront_domain_name" {
+  description = "CloudFront 기본 도메인"
+  value       = module.edge.cloudfront_domain_name
+}
+
+output "waf_web_acl_arn" {
+  description = "WAF Web ACL ARN. waf_enabled 가 false 면 null"
+  value       = module.edge.waf_web_acl_arn
 }
