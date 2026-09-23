@@ -56,8 +56,8 @@ module "compute" {
   redis_private_ip          = var.redis_private_ip
 }
 
-module "edge" {
-  source = "../../modules/edge"
+module "dns" {
+  source = "../../modules/dns"
 
   providers = {
     aws           = aws
@@ -99,5 +99,5 @@ module "lb" {
 
   envoy_node_port = var.envoy_node_port
 
-  origin_certificate_arn = module.edge.origin_certificate_arn
+  origin_certificate_arn = module.dns.origin_certificate_arn
 }

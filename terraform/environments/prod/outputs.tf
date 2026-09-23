@@ -28,7 +28,7 @@ output "ami_id" {
 
 output "route53_name_servers" {
   description = "도메인 등록기관에 입력할 NS 레코드"
-  value       = module.edge.name_servers
+  value       = module.dns.name_servers
 }
 
 output "internal_api_dns_name" {
@@ -72,7 +72,7 @@ output "vpc_id" {
 
 output "route53_zone_id" {
   description = "Route53 레코드 추가 시 참조한다."
-  value       = module.edge.zone_id
+  value       = module.dns.zone_id
 }
 
 output "rds_endpoint" {
@@ -107,12 +107,12 @@ output "rds_master_user_secret_arn" {
 
 output "cloudfront_certificate_arn" {
   description = "CloudFront 용 ACM 인증서 ARN (us-east-1)"
-  value       = module.edge.cloudfront_certificate_arn
+  value       = module.dns.cloudfront_certificate_arn
 }
 
 output "origin_certificate_arn" {
   description = "Public NLB TLS 리스너용 ACM 인증서 ARN (ap-northeast-1)"
-  value       = module.edge.origin_certificate_arn
+  value       = module.dns.origin_certificate_arn
 }
 
 output "public_nlb_arn" {
