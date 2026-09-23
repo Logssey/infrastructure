@@ -8,6 +8,7 @@
 | CloudFront 대체 도메인 | https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/CNAMEs.html |
 | ELB 보안 정책 | https://docs.aws.amazon.com/elasticloadbalancing/latest/network/describe-ssl-policies.html |
 | CloudFront 캐시 동작 | https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/distribution-web-values-specify.html |
+| CloudFront 관리형 정책 | https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-cache-policies.html |
 | WAF 관리형 룰 그룹 | https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html |
 
 ---
@@ -54,6 +55,44 @@ SEO 요구가 커지면 CloudFront Function 으로 301 리다이렉트를 추가
 
 ---
 
+## 모듈 구조
+
+엣지 계층은 세 모듈로 나뉜다.
+
+| 모듈 | 리소스 |
+| --- | --- |
+| `dns` | Route53 Hosted Zone, ACM 인증서, 검증 레코드 |
+| `lb` | Internal NLB, Public NLB, TLS 리스너 |
+| `edge` | CloudFront, WAF, 서비스 레코드 |
+
+의존 방향은 `dns → lb → edge` 로 선형이다.
+
+### 왜 나누었는가
+
+처음에는 Route53 과 CloudFront 를 한 모듈에 두었으나
+**순환 참조가 발생했다.**
+
+```
+edge → lb : TLS 리스너에 필요한 인증서 ARN
+lb  → edge : origin 레코드에 필요한 NLB DNS
+```
+
+Terraform 은 모듈 간 순환을 허용하지 않는다.
+순환은 대개 설계 문제의 신호이며, 공유 리소스를 별도 모듈로
+추출하는 것이 일반적인 해결책이다.
+
+인증서를 `dns` 모듈로 분리하자 의존이 선형이 되었다.
+
+```
+dns  (Hosted Zone + 인증서)
+ ↓
+lb   (인증서로 TLS 리스너 구성)
+ ↓
+edge (Hosted Zone·NLB 정보로 레코드와 CloudFront 구성)
+```
+
+---
+
 ## ACM
 
 ### 리전 분리
@@ -97,7 +136,7 @@ provider "aws" {
 루트에서 전달한다.
 
 ```hcl
-# modules/edge/versions.tf
+# modules/dns/versions.tf
 terraform {
   required_providers {
     aws = {
@@ -110,7 +149,7 @@ terraform {
 
 ```hcl
 # environments/prod/main.tf
-module "edge" {
+module "dns" {
   providers = {
     aws           = aws
     aws.us_east_1 = aws.us_east_1
@@ -118,6 +157,9 @@ module "edge" {
   ...
 }
 ```
+
+`dns` 와 `edge` 모듈이 각각 이 provider 를 받는다.
+`dns` 는 인증서를, `edge` 는 WAF Web ACL 을 us-east-1 에 만든다.
 
 ### DNS 검증
 
@@ -148,8 +190,9 @@ resource "aws_acm_certificate" "cloudfront" {
 }
 
 resource "aws_route53_record" "cloudfront_validation" {
-  for_each = { for dvo in aws_acm_certificate.cloudfront.domain_validation_options : dvo.domain_name => dvo }
+  for_each = { for dvo in ... : dvo.domain_name => dvo }
   ...
+  allow_overwrite = true
 }
 
 resource "aws_acm_certificate_validation" "cloudfront" {
@@ -161,10 +204,24 @@ resource "aws_acm_certificate_validation" "cloudfront" {
 ```
 
 `aws_acm_certificate_validation` 은 검증 완료까지 대기한다.
-이 리소스를 참조하면 인증서가 준비된 뒤에 CloudFront 가 생성된다.
+이 리소스를 참조하면 인증서가 준비된 뒤에 NLB 리스너와 CloudFront 가 생성된다.
 
-**와일드카드와 apex 의 검증 레코드가 동일할 수 있다.**
-`for_each` 의 키를 `domain_name` 으로 두면 중복이 제거된다.
+**apex 와 와일드카드는 같은 검증 레코드를 사용한다.**
+
+```
+_c1247be4e27b9f7f4d1a76573ab0a991.re-used.store.
+  → _ad0da13704a182dc31821420f1f0a07f.wzccmgtwzk.acm-validations.aws.
+```
+
+`for_each` 의 키를 `domain_name` 으로 두면 Terraform 은 두 항목으로 관리하나
+실제 Route53 레코드는 하나로 합쳐진다.
+`allow_overwrite` 가 없으면 두 번째 항목이
+"레코드가 이미 존재한다" 에러로 실패한다.
+
+### 발급 시간
+
+DNS 검증은 레코드 생성 후 수 분 내에 완료된다.
+본 환경에서는 2분 이내에 두 인증서 모두 `ISSUED` 가 되었다.
 
 ### 비용
 
@@ -184,7 +241,8 @@ ACM 퍼블릭 인증서는 무료다. 갱신도 무료다.
 | SSL Policy | `ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09` |
 | 타겟 그룹 | logssey-prod-tg-envoy (TCP 30080) |
 
-기존 NLB 에 리스너를 추가하는 작업이므로 재생성이 발생하지 않는다.
+리스너를 교체해도 타겟 그룹은 영향받지 않는다.
+80 에서 443 으로 바꾼 뒤에도 Worker 3대가 healthy 를 유지했다.
 
 ### HTTP 80 리스너 제거
 
@@ -228,14 +286,31 @@ aws elbv2 describe-ssl-policies \
   --output text | tr '\t' '\n'
 ```
 
+### 오리진 직접 접근 차단
+
+`sg-public-nlb` 는 CloudFront 의 `origin-facing` prefix list 로만 443 을 허용한다.
+
+```hcl
+data "aws_ec2_managed_prefix_list" "cloudfront" {
+  name = "com.amazonaws.global.cloudfront.origin-facing"
+}
+```
+
+`origin.re-used.store` 가 공개 도메인이지만 **CloudFront 를 거치지 않은
+접근은 SG 에서 차단된다.** 로컬에서 직접 curl 하면 타임아웃이 발생하며
+이것이 정상 동작이다.
+
+`com.amazonaws.global.cloudfront` 는 CloudFront 전체 IP 로 범위가 더 넓다.
+오리진 접근에는 `origin-facing` 이 적절하다.
+
 ---
 
 ## Route53
 
 | 레코드 | 타입 | 대상 |
 | --- | --- | --- |
-| `re-used.store` | A (alias) | CloudFront |
-| `www.re-used.store` | A (alias) | CloudFront |
+| `re-used.store` | A, AAAA (alias) | CloudFront |
+| `www.re-used.store` | A, AAAA (alias) | CloudFront |
 | `origin.re-used.store` | A (alias) | Public NLB |
 
 **alias 레코드를 사용한다.**
@@ -249,8 +324,27 @@ aws elbv2 describe-ssl-policies \
 DNS 표준상 apex 에는 CNAME 을 둘 수 없다.
 Route53 alias 는 A 레코드처럼 동작하면서 AWS 리소스를 가리킬 수 있다.
 
-CloudFront 의 Hosted Zone ID 는 고정값 `Z2FDTNDATAQYW2` 다.
+### IPv6
+
+CloudFront 는 `is_ipv6_enabled = true` 로 IPv6 를 지원하므로
+AAAA 레코드도 함께 만든다. alias 레코드는 추가 비용이 없다.
+
+NLB 는 현재 IPv4 전용이므로 `origin` 은 A 레코드만 둔다.
+
+### Hosted Zone ID
+
+CloudFront 의 Hosted Zone ID 는 전역 고정값 `Z2FDTNDATAQYW2` 이나
+`aws_cloudfront_distribution.main.hosted_zone_id` 속성으로 참조해
+하드코딩을 피한다.
+
 NLB 는 리전마다 다르며 `aws_lb.public.zone_id` 로 참조한다.
+
+### evaluate_target_health
+
+모든 alias 레코드에서 `false` 로 둔다.
+
+`true` 면 대상이 전부 unhealthy 일 때 DNS 응답 자체가 사라져
+장애 원인 파악이 어려워진다.
 
 ---
 
@@ -267,6 +361,7 @@ NLB 는 리전마다 다르며 `aws_lb.public.zone_id` 로 참조한다.
 | Viewer Protocol | `redirect-to-https` |
 | Origin Protocol | `https-only` |
 | Origin | `origin.re-used.store` |
+| IPv6 | 활성 |
 | 로깅 | 비활성 |
 
 ### Price Class
@@ -279,6 +374,9 @@ NLB 는 리전마다 다르며 `aws_lb.public.zone_id` 로 참조한다.
 
 한국 사용자 대상이므로 아시아 엣지가 필요하다.
 `PriceClass_100` 은 아시아를 제외해 응답이 느려진다.
+
+실제로 한국에서 접속하면 서울 엣지(`ICN53`)로 연결된다.
+응답 헤더의 `x-amz-cf-pop` 으로 확인할 수 있다.
 
 ### Origin
 
@@ -299,47 +397,52 @@ CloudFront 는 `origin.re-used.store` 로 NLB 에 연결한다.
 
 `docs/07-ingress.md` 의 Path 기반 라우팅과 같은 규칙을 공유한다.
 
-| 순서 | Path | 캐싱 | 비고 |
-| --- | --- | --- | --- |
-| 1 | `/api/*` | 비활성 | 동적 응답 |
-| 2 | `/socket.io/*` | 비활성 | WebSocket |
-| 3 | `/assets/*` | 활성 (장기) | 정적 파일 |
-| — | Default (`*`) | 활성 (단기) | 프론트엔드 |
+| 순서 | Path | 캐시 정책 | 오리진 요청 정책 | 압축 |
+| --- | --- | --- | --- | --- |
+| 1 | `/api/*` | CachingDisabled | AllViewer | 활성 |
+| 2 | `/socket.io/*` | CachingDisabled | AllViewer | 비활성 |
+| 3 | `/assets/*` | CachingOptimized | 없음 | 활성 |
+| — | Default (`*`) | CachingOptimized | 없음 | 활성 |
 
-**Behavior 는 순서대로 평가된다.** 먼저 매칭되는 규칙이 적용되므로
+**Behavior 는 선언 순서대로 평가된다.** 먼저 매칭되는 규칙이 적용되므로
 구체적인 경로를 앞에 둔다.
 
-#### 캐시 정책
+#### 관리형 정책
 
-AWS 관리형 정책을 사용한다.
+AWS 관리형 정책을 data source 로 참조한다.
+직접 정의할 수도 있으나 관리형 정책이 일반적인 요구를 충족한다.
 
-| 용도 | 정책 |
+| 정책 | 동작 |
 | --- | --- |
-| 캐싱 비활성 | `CachingDisabled` |
-| 정적 파일 | `CachingOptimized` |
+| `Managed-CachingDisabled` | 캐싱하지 않음 |
+| `Managed-CachingOptimized` | 압축 활성, 쿼리스트링·쿠키·헤더를 캐시 키에서 제외 |
+| `Managed-AllViewer` | 뷰어의 모든 헤더·쿠키·쿼리스트링을 오리진에 전달 |
 
-#### Origin Request 정책
+```hcl
+data "aws_cloudfront_cache_policy" "caching_optimized" {
+  name = "Managed-CachingOptimized"
+}
+```
 
-백엔드에 전달할 헤더·쿠키·쿼리스트링을 정의한다.
+#### WebSocket
 
-| 용도 | 정책 |
-| --- | --- |
-| API, WebSocket | `AllViewer` — 모든 요청 정보 전달 |
-| 정적 파일 | `CORS-S3Origin` 또는 없음 |
-
-**WebSocket 은 `Upgrade` 와 `Connection` 헤더가 전달되어야 한다.**
-`AllViewer` 정책이 이를 포함한다.
+**`Upgrade` 와 `Connection` 헤더가 오리진에 전달되어야 한다.**
+`AllViewer` 오리진 요청 정책이 이를 포함한다.
 
 CloudFront 는 WebSocket 을 기본 지원하며 별도 설정이 필요 없다.
 
+압축은 비활성화한다. WebSocket 프레임과 충돌할 수 있다.
+
 #### 허용 메서드
 
-| Behavior | 메서드 |
-| --- | --- |
-| `/api/*` | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE |
-| `/socket.io/*` | 같음 |
-| `/assets/*` | GET, HEAD |
-| Default | GET, HEAD, OPTIONS |
+| Behavior | allowed_methods | cached_methods |
+| --- | --- | --- |
+| `/api/*` | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE | GET, HEAD |
+| `/socket.io/*` | 같음 | GET, HEAD |
+| `/assets/*` | GET, HEAD | GET, HEAD |
+| Default | GET, HEAD, OPTIONS | GET, HEAD |
+
+`cached_methods` 는 `allowed_methods` 의 부분집합이어야 한다.
 
 ### 로깅 미적용
 
@@ -371,13 +474,16 @@ CloudFront 는 WebSocket 을 기본 지원하며 별도 설정이 필요 없다.
 **Web ACL 은 us-east-1 에 만들어야 한다.**
 CloudFront 에 연결하는 Web ACL 은 리전이 고정되어 있다.
 
+`waf_enabled` 변수로 연결 여부를 제어한다.
+비활성화하면 Web ACL 자체가 생성되지 않아 과금이 없다.
+
 ### 관리형 룰 그룹
 
-| 룰 그룹 | 내용 |
-| --- | --- |
-| `AWSManagedRulesCommonRuleSet` | OWASP 기반 공통 규칙 |
-| `AWSManagedRulesKnownBadInputsRuleSet` | 알려진 악성 입력 패턴 |
-| `AWSManagedRulesAmazonIpReputationList` | 평판이 낮은 IP 목록 |
+| 우선순위 | 룰 그룹 | 내용 |
+| --- | --- | --- |
+| 1 | `AWSManagedRulesCommonRuleSet` | OWASP 기반 공통 규칙 |
+| 2 | `AWSManagedRulesKnownBadInputsRuleSet` | 알려진 악성 입력 패턴 |
+| 3 | `AWSManagedRulesAmazonIpReputationList` | 평판이 낮은 IP 목록 |
 
 AWS 가 관리하며 자동으로 갱신된다.
 
@@ -392,10 +498,22 @@ AWS 가 관리하며 자동으로 갱신된다.
 Count 모드는 매칭만 기록하고 요청은 통과시킨다.
 실제 트래픽 패턴을 확인한 뒤 룰별로 Block 으로 전환한다.
 
+```hcl
+override_action {
+  count {}
+}
+```
+
+**`override_action` 은 룰 그룹 안의 개별 룰 동작을 덮어쓴다.**
+관리형 룰 그룹의 개별 룰은 기본적으로 Block 이며,
+이 설정으로 전부 Count 로 바뀐다.
+
+매칭된 요청 샘플 조회.
+
 ```bash
 aws wafv2 get-sampled-requests \
-  --web-acl-arn <arn> \
-  --rule-metric-name <name> \
+  --web-acl-arn $(terraform output -raw waf_web_acl_arn) \
+  --rule-metric-name AWSManagedRulesCommonRuleSet \
   --scope CLOUDFRONT \
   --time-window StartTime=<t1>,EndTime=<t2> \
   --max-items 100 \
@@ -453,6 +571,17 @@ aws acm list-certificates \
 
 `ISSUED` 여야 한다. `PENDING_VALIDATION` 이면 DNS 레코드 전파를 기다린다.
 
+검증 레코드 확인.
+
+```bash
+aws route53 list-resource-record-sets \
+  --hosted-zone-id $(terraform output -raw route53_zone_id) \
+  --query "ResourceRecordSets[?Type=='CNAME'].[Name,ResourceRecords[0].Value]" \
+  --output table
+```
+
+apex 와 와일드카드가 하나의 레코드를 공유하므로 CNAME 은 2개다.
+
 ### NLB 리스너
 
 ```bash
@@ -470,60 +599,141 @@ TLS 443 하나만 있어야 한다.
 ```bash
 dig re-used.store +short
 dig www.re-used.store +short
+dig re-used.store AAAA +short
 dig origin.re-used.store +short
 ```
 
 apex 와 www 는 CloudFront IP, origin 은 NLB IP 가 나온다.
+Route53 이 라운드로빈으로 응답하므로 조회할 때마다 순서가 바뀐다.
 
-### 오리진 직접 접속
-
-CloudFront 를 거치지 않고 NLB 로 직접 확인한다.
+### 오리진 직접 접속 — 차단 확인
 
 ```bash
-curl -sS -o /dev/null -w "%{http_code} %{ssl_verify_result}\n" \
+curl -sS --max-time 10 -o /dev/null -w "%{http_code}\n" \
   https://origin.re-used.store/
 ```
 
-라우트가 없으면 404 가 정상이다. `ssl_verify_result` 가 0 이면
-인증서 검증에 성공한 것이다.
+**타임아웃이 정상이다.** SG 가 CloudFront IP 만 허용하므로
+외부에서 오리진에 직접 접근할 수 없다.
 
 ### CloudFront 경유
 
 ```bash
-curl -sS -o /dev/null -w "%{http_code}\n" https://re-used.store/
-curl -sS -o /dev/null -w "%{http_code}\n" https://www.re-used.store/
-
-# HTTP 리다이렉트 확인
-curl -sS -o /dev/null -w "%{http_code} -> %{redirect_url}\n" http://re-used.store/
+curl -sS -o /dev/null -w "code=%{http_code}\n" https://re-used.store/
+curl -sS -o /dev/null -w "code=%{http_code}\n" https://www.re-used.store/
 ```
 
-HTTP 요청은 301 로 HTTPS 에 리다이렉트되어야 한다.
+**404 가 정상이다.** CloudFront → NLB → Envoy 까지 도달했고,
+Envoy 에 매칭되는 HTTPRoute 가 없다는 뜻이다.
 
-### 캐시 동작
+HTTP 리다이렉트 확인.
 
 ```bash
-curl -sI https://re-used.store/ | grep -i "x-cache"
+curl -sS -o /dev/null -w "code=%{http_code} -> %{redirect_url}\n" \
+  http://re-used.store/
 ```
+
+```
+code=301 -> https://re-used.store/
+```
+
+### 응답 헤더
+
+```bash
+curl -sI https://re-used.store/ | head -10
+```
+
+```
+HTTP/2 404
+x-cache: Error from cloudfront
+via: 1.1 <hash>.cloudfront.net (CloudFront)
+x-amz-cf-pop: ICN53-P1
+age: 4
+```
+
+| 헤더 | 의미 |
+| --- | --- |
+| `x-amz-cf-pop` | 응답한 엣지 로케이션. ICN 은 서울 |
+| `x-cache` | 캐시 히트 여부 |
+| `age` | 캐시된 후 경과 시간 |
+
+**`x-cache: Error from cloudfront`** 는 오리진이 4xx/5xx 를 반환했다는 뜻이다.
+404 응답도 기본 10초간 캐싱되므로 `age` 헤더가 나타난다.
+
+라우트를 붙이면 `Miss from cloudfront` 또는 `Hit from cloudfront` 로 바뀐다.
 
 | 값 | 의미 |
 | --- | --- |
 | `Miss from cloudfront` | 오리진에서 가져옴 |
 | `Hit from cloudfront` | 캐시 응답 |
+| `Error from cloudfront` | 오리진이 에러 반환 |
 
 `/api/*` 는 캐싱을 비활성화했으므로 항상 Miss 여야 한다.
 
 ### WAF
 
 ```bash
-aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1
+aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 \
+  --query 'WebACLs[].[Name,Id]' --output table
+```
 
+룰 구성 확인.
+
+```bash
+WAF_ID=$(aws wafv2 list-web-acls --scope CLOUDFRONT --region us-east-1 \
+  --query "WebACLs[?Name=='logssey-prod-waf'].Id" --output text)
+
+aws wafv2 get-web-acl \
+  --name logssey-prod-waf --scope CLOUDFRONT --id $WAF_ID \
+  --region us-east-1 \
+  --query 'WebACL.Rules[].[Name,Priority,OverrideAction]' \
+  --output json
+```
+
+세 룰 모두 `{"Count": {}}` 여야 한다.
+
+CloudFront 연결 확인.
+
+```bash
 aws cloudfront get-distribution \
-  --id <distribution-id> \
+  --id $(terraform output -raw cloudfront_distribution_id) \
   --query 'Distribution.DistributionConfig.WebACLId' \
   --output text
 ```
 
-연결된 Web ACL ARN 이 출력되어야 한다.
+매칭 지표 확인.
+
+```bash
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/WAFV2 \
+  --metric-name CountedRequests \
+  --dimensions Name=WebACL,Value=logssey-prod-waf Name=Rule,Value=ALL Name=Region,Value=CloudFront \
+  --start-time $(date -u -d '30 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 --statistics Sum \
+  --region us-east-1
+```
+
+`Datapoints` 가 비어 있으면 어떤 룰에도 매칭되지 않은 것이다.
+정상 요청만 발생한 상태에서는 이것이 기대값이다.
+
+---
+
+## 구축 결과 (2026-09-23)
+
+| 항목 | 값 |
+| --- | --- |
+| CloudFront Distribution | EYTWHIBCVO5FY |
+| 기본 도메인 | duo9ob5udgpq0.cloudfront.net |
+| 상태 | Deployed |
+| 엣지 (한국 접속 시) | ICN53-P1 |
+| WAF | 연결됨, 룰 3개 Count |
+
+전체 경로가 동작한다.
+
+```
+클라이언트 → CloudFront (ICN53) → Public NLB → Envoy → 404
+```
 
 ---
 
@@ -538,6 +748,7 @@ aws cloudfront get-distribution \
 | CloudFront Function | 헤더 조작, A/B 테스트 등 필요 시 |
 | Origin Access Control | S3 오리진 추가 시 |
 | 커스텀 에러 페이지 | 프론트엔드 SPA 라우팅 대응 시 |
+| 404 캐싱 TTL 조정 | 개발 중 응답 확인이 불편할 때 |
 
 **SPA 라우팅 주의** — 프론트엔드가 클라이언트 사이드 라우팅을 쓰면
 `/some/path` 직접 접속 시 오리진이 404 를 반환한다.
