@@ -496,3 +496,128 @@ docs/                   구현 명세
 | [06](docs/troubleshooting/06-kubelet-api-sg.md) | kubelet API 접근 불가 | SG — 10250 방향 누락 |
 | [07](docs/troubleshooting/07-iptables-corruption-l7.md) | L7 NetworkPolicy 미동작 | iptables 직접 조작으로 Cilium 상태 손상 |
 | [08](docs/troubleshooting/08-envoy-gateway-nodeport.md) | Envoy Gateway NodePort 고정 실패 | StrategicMerge 병합 키, DoNotSchedule 교착 |
+
+
+---
+
+## 임시 — 개발 단계 전용
+
+**서비스 배포 전까지만 유효한 내용이다.**
+애플리케이션이 올라가면 이 절을 제거한다.
+
+### 비용 절감을 위한 노드 중지
+
+작업하지 않는 동안 EC2 를 중지해 비용을 줄일 수 있다.
+중지 중에는 인스턴스 시간 요금이 발생하지 않는다.
+
+
+EBS, NLB, NAT Gateway, Route53, CloudFront 는 중지해도 과금된다.
+
+**RDS 는 최대 7일까지만 중지된다.** 이후 AWS 가 자동으로 시작한다.
+
+#### 중지 — 역순
+
+| 순서 | 대상 |
+| --- | --- |
+| 1 | worker-a, worker-c, worker-d |
+| 2 | cp-a, cp-c, cp-d |
+| 3 | etcd-a, etcd-c, etcd-d |
+
+Redis 는 클러스터 구성원이 아니므로 순서와 무관하다.
+
+#### 시작 — 정순
+
+**각 단계를 확인한 뒤 다음으로 넘어간다.**
+인스턴스가 `running` 이어도 OS 부팅과 에이전트 기동에 시간이 걸리므로
+상태 검사 2/2 통과를 기다린다.
+
+**1. etcd 3대**
+
+```bash
+ETCD_A=$(terraform output -json etcd_instance_ids \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)[0])')
+
+aws ssm start-session --target $ETCD_A --region ap-northeast-1
+```
+
+```bash
+sudo su -
+set -a; . /etc/etcd.env; set +a
+/usr/local/bin/etcdctl endpoint health --cluster
+```
+
+3대 전부 `is healthy` 여야 한다.
+
+**2. Control Plane 3대**
+
+```bash
+CP_A=$(terraform output -json control_plane_instance_ids \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)[0])')
+
+aws ssm start-session --target $CP_A --region ap-northeast-1
+```
+
+```bash
+sudo su - ubuntu
+kubectl get nodes
+```
+
+CP 3대가 Ready 가 될 때까지 3~5분 걸린다.
+Worker 는 `NotReady`, 워커에 있던 Pod 는 `Unknown` 으로 보이는 것이 정상이다.
+
+**3. Worker 3대**
+
+```bash
+kubectl get nodes
+kubectl get pods -A | grep -v Running | grep -v Completed
+```
+
+6대 Ready 가 되고 1~2분 뒤 Pod 가 자동 복구된다.
+
+#### 복구 동작
+
+**수동 개입이 필요하지 않다.** 검증 완료(2026-09-23).    
+노드 시작 → kubelet 등록 → Ready    
+→ kubelet 이 할당된 Pod 목록 조회    
+→ 컨테이너 재시작 (RESTARTS +1)    
+→ Service 엔드포인트 복구    
+→ NLB 헬스체크 통과    
+
+
+Pod 이름과 AGE 는 유지된다. 스케줄러가 새로 배치하는 것이 아니라
+kubelet 이 같은 Pod 정의로 컨테이너만 다시 띄우기 때문이다.
+
+`/opt/cni/bin` 소유자도 디스크에 저장되므로 유지된다.
+
+#### 확인
+
+```bash
+cd terraform/environments/prod
+
+aws elbv2 describe-target-health \
+  --target-group-arn $(terraform output -raw public_target_group_arn) \
+  --region ap-northeast-1 \
+  --query 'TargetHealthDescriptions[].[Target.Id,TargetHealth.State]' --output table
+
+curl -sS -o /dev/null -w "%{http_code}\n" "https://re-used.store/?t=$(date +%s)"
+```
+
+**쿼리스트링으로 CloudFront 캐시를 우회한다.**
+캐시가 남아 있으면 오리진이 죽어도 정상 응답이 오므로
+복구 시점을 정확히 판단할 수 없다.
+
+### 테스트용 nginx
+
+전체 경로 검증을 위해 임시로 배포했다.
+
+| 리소스 | 이름 | 네임스페이스 |
+| --- | --- | --- |
+| Deployment | nginx-test | default |
+| Service | nginx-test | default |
+| HTTPRoute | nginx-test | default |
+
+```bash
+kubectl delete deployment,service,httproute nginx-test
+```
+
+애플리케이션 배포 시 제거한다.
