@@ -10,3 +10,13 @@ output "name_servers" {
   EOT
   value       = aws_route53_zone.main.name_servers
 }
+
+output "cloudfront_certificate_arn" {
+  description = "CloudFront 용 ACM 인증서 ARN (us-east-1)"
+  value       = aws_acm_certificate_validation.cloudfront.certificate_arn
+}
+
+output "origin_certificate_arn" {
+  description = "Public NLB TLS 리스너용 ACM 인증서 ARN (ap-northeast-1)"
+  value       = aws_acm_certificate_validation.origin.certificate_arn
+}

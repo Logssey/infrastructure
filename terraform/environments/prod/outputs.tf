@@ -104,3 +104,13 @@ output "rds_master_user_secret_arn" {
   EOT
   value       = module.rds.master_user_secret_arn
 }
+
+output "cloudfront_certificate_arn" {
+  description = "CloudFront 용 ACM 인증서 ARN (us-east-1)"
+  value       = module.edge.cloudfront_certificate_arn
+}
+
+output "origin_certificate_arn" {
+  description = "Public NLB TLS 리스너용 ACM 인증서 ARN (ap-northeast-1)"
+  value       = module.edge.origin_certificate_arn
+}
