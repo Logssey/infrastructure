@@ -101,3 +101,25 @@ module "lb" {
 
   origin_certificate_arn = module.dns.origin_certificate_arn
 }
+
+module "edge" {
+  source = "../../modules/edge"
+
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  name_prefix = local.name_prefix
+  domain_name = var.domain_name
+
+  zone_id         = module.dns.zone_id
+  certificate_arn = module.dns.cloudfront_certificate_arn
+
+  origin_domain       = "origin.${var.domain_name}"
+  public_nlb_dns_name = module.lb.public_nlb_dns_name
+  public_nlb_zone_id  = module.lb.public_nlb_zone_id
+
+  waf_enabled = var.waf_enabled
+  price_class = var.cloudfront_price_class
+}

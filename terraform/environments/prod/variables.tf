@@ -191,3 +191,22 @@ variable "rds_multi_az" {
   type        = bool
   default     = false
 }
+
+# ─────────────────────────────────────────────
+# 엣지
+# ─────────────────────────────────────────────
+
+variable "waf_enabled" {
+  description = <<-EOT
+    CloudFront 에 WAF Web ACL 을 연결한다.
+    Web ACL 월 $5 + 관리형 룰 그룹당 $1 이 과금된다.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "cloudfront_price_class" {
+  description = "CloudFront 엣지 로케이션 범위"
+  type        = string
+  default     = "PriceClass_200"
+}
