@@ -114,3 +114,12 @@ output "origin_certificate_arn" {
   description = "Public NLB TLS 리스너용 ACM 인증서 ARN (ap-northeast-1)"
   value       = module.edge.origin_certificate_arn
 }
+
+output "public_nlb_arn" {
+  value = module.lb.public_nlb_arn
+}
+
+output "public_nlb_zone_id" {
+  description = "Route53 alias 레코드 생성에 필요하다."
+  value       = module.lb.public_nlb_zone_id
+}

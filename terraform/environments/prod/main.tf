@@ -98,4 +98,6 @@ module "lb" {
   worker_instance_ids        = module.compute.worker_instance_ids
 
   envoy_node_port = var.envoy_node_port
+
+  origin_certificate_arn = module.edge.origin_certificate_arn
 }
