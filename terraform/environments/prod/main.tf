@@ -3,6 +3,10 @@ locals {
   name_prefix = "${var.project}-${var.environment}"
 }
 
+# ─────────────────────────────────────────────
+# 기반 계층
+# ─────────────────────────────────────────────
+
 module "network" {
   source = "../../modules/network"
 
@@ -34,6 +38,10 @@ module "iam" {
   tfstate_bucket = var.tfstate_bucket
 }
 
+# ─────────────────────────────────────────────
+# 컴퓨트 · 데이터 계층
+# ─────────────────────────────────────────────
+
 module "compute" {
   source = "../../modules/compute"
 
@@ -56,18 +64,6 @@ module "compute" {
   redis_private_ip          = var.redis_private_ip
 }
 
-module "dns" {
-  source = "../../modules/dns"
-
-  providers = {
-    aws           = aws
-    aws.us_east_1 = aws.us_east_1
-  }
-
-  name_prefix = local.name_prefix
-  domain_name = var.domain_name
-}
-
 module "rds" {
   source = "../../modules/rds"
 
@@ -80,6 +76,29 @@ module "rds" {
   parameter_group_family = var.rds_parameter_group_family
   instance_class         = var.rds_instance_class
   multi_az               = var.rds_multi_az
+}
+
+# ─────────────────────────────────────────────
+# 엣지 계층
+#
+# 의존 순서: dns → lb → edge
+#   dns  : Hosted Zone, ACM 인증서
+#   lb   : NLB (dns 의 origin 인증서 사용)
+#   edge : CloudFront, WAF, 서비스 레코드 (dns·lb 참조)
+#
+# 모듈을 이 순서로 나눈 것은 순환 참조를 피하기 위함이다.
+# ─────────────────────────────────────────────
+
+module "dns" {
+  source = "../../modules/dns"
+
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  name_prefix = local.name_prefix
+  domain_name = var.domain_name
 }
 
 module "lb" {

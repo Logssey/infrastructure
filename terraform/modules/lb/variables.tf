@@ -58,7 +58,7 @@ variable "origin_certificate_arn" {
   description = <<-EOT
     Public NLB TLS 리스너용 ACM 인증서 ARN.
 
-    origin.<domain> 에 대한 인증서이며 edge 모듈에서 발급한다.
+    origin.<domain> 에 대한 인증서이며 dns 모듈에서 발급한다.
     CloudFront 가 Custom Origin 에 HTTPS 로 연결하려면
     오리진 도메인에 대한 퍼블릭 신뢰 인증서가 필요하다.
   EOT

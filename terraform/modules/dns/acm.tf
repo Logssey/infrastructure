@@ -17,7 +17,7 @@
 # ── CloudFront 용 (us-east-1) ──
 #
 # 와일드카드는 apex 를 포함하지 않는다.
-# *.re-used.store 는 www 를 커버하지만 re-used.store 자체는 커버하지 않는다.
+# *.<domain> 은 www.<domain> 을 커버하지만 <domain> 자체는 커버하지 않는다.
 # apex 를 주 도메인으로, 와일드카드를 SAN 으로 둔다.
 #
 # 와일드카드를 넣어두면 향후 서브도메인 추가 시 재발급이 불필요하다.
@@ -41,8 +41,12 @@ resource "aws_acm_certificate" "cloudfront" {
 
 # 검증용 CNAME 레코드
 #
-# apex 와 와일드카드의 검증 레코드가 동일한 경우가 있다.
-# for_each 의 키를 domain_name 으로 두어 중복을 제거한다.
+# apex 와 와일드카드는 같은 검증 레코드를 사용한다.
+# for_each 의 키를 domain_name 으로 두면 Terraform 은 두 항목으로 관리하나
+# 실제 Route53 레코드는 하나로 합쳐진다.
+#
+# allow_overwrite 가 없으면 두 번째 항목이
+# "레코드가 이미 존재한다" 에러로 실패한다.
 resource "aws_route53_record" "cloudfront_validation" {
   for_each = {
     for dvo in aws_acm_certificate.cloudfront.domain_validation_options :

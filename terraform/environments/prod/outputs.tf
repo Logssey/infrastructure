@@ -123,3 +123,25 @@ output "public_nlb_zone_id" {
   description = "Route53 alias 레코드 생성에 필요하다."
   value       = module.lb.public_nlb_zone_id
 }
+
+output "cloudfront_distribution_id" {
+  description = <<-EOT
+    CloudFront Distribution ID.
+
+    캐시 무효화:
+      aws cloudfront create-invalidation \
+        --distribution-id $(terraform output -raw cloudfront_distribution_id) \
+        --paths "/*"
+  EOT
+  value       = module.edge.cloudfront_distribution_id
+}
+
+output "cloudfront_domain_name" {
+  description = "CloudFront 기본 도메인"
+  value       = module.edge.cloudfront_domain_name
+}
+
+output "waf_web_acl_arn" {
+  description = "WAF Web ACL ARN. waf_enabled 가 false 면 null"
+  value       = module.edge.waf_web_acl_arn
+}
