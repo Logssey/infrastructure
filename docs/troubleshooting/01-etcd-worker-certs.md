@@ -7,6 +7,35 @@
 | 영향 | 워커 3대 실패, 플레이북 중단 → etcd 설치 이후 단계 진행 불가 |
 | 환경 | Kubespray v2.31.0, External etcd, Cilium |
 
+## 배경 — etcd 인증서 3종
+
+Kubespray 는 용도별로 세 종류의 인증서를 생성한다.
+
+| 접두사 | 용도 | 배포 대상 |
+| --- | --- | --- |
+| `member-` | etcd 서버·peer 통신 | etcd 노드 |
+| `admin-` | etcdctl 클라이언트 | etcd 노드 |
+| `node-` | etcd 클라이언트 | Control Plane, Worker |
+
+파일명은 **인벤토리 호스트명**을 따른다. etcd 내부 멤버명(`etcd1`)과 다르다.
+
+```
+member-etcd-a.pem     etcd-a 의 서버 인증서
+node-worker-a.pem     worker-a 의 etcd 클라이언트 인증서
+```
+
+`node-` 인증서는 CNI 가 etcd 를 데이터 저장소로 사용할 때 필요하다.
+본 환경의 Cilium 은 CRD 모드로 동작하므로 **실제로는 사용되지 않는다.**
+
+```bash
+ansible -i inventory/logssey/inventory.ini worker-a -m shell -b \
+  -a "grep -rl 'node-worker-a' /etc/ 2>/dev/null"
+# 출력 없음
+```
+
+배포는 되지만 참조하는 설정 파일이 없다.
+Kubespray 가 `kube_network_plugin` 이 cilium 이면 무조건 생성하는 구조다.
+
 ## 증상
 
 `cluster.yml` 실행 시 워커 3대에서 동일한 태스크가 실패했다.
@@ -100,7 +129,7 @@ grep -n "run cert generation script" /tmp/full.log
 
 **두 번째 태스크가 실행되지 않았다.**
 
-### 4. 조건 확인
+### 4. gen_certs 평가 확인
 
 `roles/etcd/tasks/check_certs.yml`에 `gen_certs`를 설정하는 태스크가 두 개 있다.
 
@@ -113,18 +142,46 @@ grep -n "gen_certs" /tmp/full.log
 5132: Check_certs | Set 'gen_certs' to true if expected certificates are not on the first etcd node(1/2)
 ```
 
-`(2/2)`가 실행되지 않았다. 이 태스크가 `k8s_cluster` 전체의 인증서 존재 여부를 검사해
-`gen_certs`를 설정하는데, `(1/2)`에서 이미 CP 인증서가 생성되면서
-조건 평가가 어긋난 것으로 보인다.
-
-두 태스크 모두 `run_once: true`라 play의 첫 호스트에서만 평가된다.
+`(2/2)`가 실행되지 않았다.
 
 ## 원인
 
-Kubespray의 `gen_certs` 평가 순서 문제.
-Control Plane 인증서 생성 후 `gen_certs` 상태가 변해 워커용 생성 태스크가 스킵된다.
+두 태스크는 **검사 대상 호스트 그룹이 다르다.**
 
-`etcd_node_cert_hosts` 기본값은 `groups['k8s_cluster']`로 워커를 포함하고 있으므로
+```jinja
+(1/2)  {% set k8s_nodes = groups['kube_control_plane'] %}
+(2/2)  {% set k8s_nodes = groups['k8s_cluster'] | unique | sort %}
+```
+
+`(1/2)` 는 Control Plane 의 `node-` 인증서만, `(2/2)` 는 Worker 까지 포함해 검사한다.
+
+두 태스크 모두 같은 조건으로 `gen_certs` 를 설정한다.
+
+```yaml
+when:
+  - ...
+  - force_etcd_cert_refresh or not item in etcdcert_master.files | map(attribute='path') | list
+```
+
+`etcdcert_master` 는 태스크 파일 **맨 위에서 한 번만** 수집된다.
+
+```yaml
+- name: "Check_certs | Register certs that have already been generated on first etcd node"
+  find:
+    paths: "{{ etcd_cert_dir }}"
+    patterns: "ca.pem,node*.pem,member*.pem,admin*.pem"
+  register: etcdcert_master
+  run_once: true
+```
+
+`check_certs.yml` 은 `cluster.yml` 실행 중 여러 번 호출된다.
+2회차 이후에는 `(1/2)` 가 검사하는 CP 인증서가 이미 존재하므로 조건이 거짓이 되고,
+`gen_certs` 는 기본값 `false` 로 남는다.
+
+`(2/2)` 가 Worker 인증서 부재를 감지해 `true` 로 덮어써야 하나,
+같은 `etcdcert_master` 스냅샷을 참조하는 평가 시점 문제로 실행되지 않았다.
+
+`etcd_node_cert_hosts` 기본값은 `groups['k8s_cluster']` 로 워커를 포함하므로
 변수 설정 문제는 아니다.
 
 ```bash
@@ -167,6 +224,9 @@ ansible -i inventory/logssey/inventory.ini etcd-a -m shell -b \
 
 노드를 추가할 때(`scale.yml`) 같은 문제가 발생하면 동일하게 수동 생성한다.
 
+`no_log`가 걸린 태스크는 `-e unsafe_show_logs=true`로 출력을 볼 수 있다.
+etcd 인증서 관련 태스크 대부분이 여기 해당하므로 처음부터 켜고 실행하는 것이 낫다.
+
 ## 참고
 
 | 항목 | 경로 |
@@ -175,5 +235,3 @@ ansible -i inventory/logssey/inventory.ini etcd-a -m shell -b \
 | 조건 판단 | `roles/etcd/tasks/check_certs.yml` |
 | 변수 기본값 | `roles/etcd_defaults/defaults/main.yml` |
 | 생성 스크립트 | 노드의 `/usr/local/bin/etcd-scripts/make-ssl-etcd.sh` |
-
-`no_log`가 걸린 태스크는 `-e unsafe_show_logs=true`로 출력을 볼 수 있다.

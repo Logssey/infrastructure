@@ -40,7 +40,7 @@ resource "aws_subnet" "private_app" {
 
 # ─────────────────────────────────────────────
 # Private-Etcd Subnet
-#   external etcd 전용. NACL로 2379/2380 외를 차단한다.
+#   external etcd 전용. 접근 통제는 Security Group이 담당한다.
 # ─────────────────────────────────────────────
 
 resource "aws_subnet" "private_etcd" {

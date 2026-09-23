@@ -19,6 +19,9 @@ deployment:
     topologySpreadConstraints:
       - maxSkew: 1
         topologyKey: kubernetes.io/hostname
+        # replica 2 에 노드 3대이므로 롤링 업데이트의 서지 Pod 가
+        # 배치될 여유가 있다. 데이터플레인(envoyproxy.yaml)은
+        # replica 가 노드 수와 같아 ScheduleAnyway 를 쓴다.
         whenUnsatisfiable: DoNotSchedule
         labelSelector:
           matchLabels:

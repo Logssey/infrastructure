@@ -26,3 +26,26 @@ provider "aws" {
     }
   }
 }
+
+# ─────────────────────────────────────────────
+# us-east-1 provider
+#
+# CloudFront 는 us-east-1 리전의 ACM 인증서만 사용할 수 있고,
+# CLOUDFRONT scope 의 WAF Web ACL 도 이 리전에 생성해야 한다.
+#
+# default_tags 는 provider 마다 독립적이므로 다시 선언한다.
+# ─────────────────────────────────────────────
+
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      Project     = var.project
+      Environment = var.environment
+      ManagedBy   = "terraform"
+      Owner       = var.owner
+    }
+  }
+}

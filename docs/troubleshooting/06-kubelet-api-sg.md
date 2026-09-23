@@ -211,7 +211,6 @@ Worker 간 경로는 고려하지 않았다.
 | --- | --- |
 | metrics-server | 모든 노드의 kubelet:10250 |
 | Prometheus | 노드 exporter, kubelet metrics |
-| Hubble Relay | Cilium agent:4244 |
 
 ## 참고
 

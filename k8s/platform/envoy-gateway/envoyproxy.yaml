@@ -50,7 +50,9 @@ spec:
                 #   does not contain declared merge key: port
                 #
                 # 포트 이름은 리스너 이름이 아니라 "http-<port>" 형식이다.
-                # NodePort 30080 은 Public NLB 타겟 그룹, SG 2번 규칙과 일치해야 한다.
+                # nodePort 는 Terraform 의 envoy_node_port 변수와 일치해야 한다.
+                #   terraform/environments/prod/variables.tf
+                #   Public NLB 타겟 그룹과 SG 2번 규칙이 같은 값을 사용한다.
                 - port: 80
                   name: http-80
                   nodePort: 30080

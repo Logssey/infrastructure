@@ -43,6 +43,9 @@ resources:
 
 # 두 replica 를 서로 다른 노드에 배치한다.
 # 차트가 자동으로 anti-affinity 를 넣지 않으므로 명시한다.
+#
+# replica 2 에 노드 3대이므로 롤링 업데이트 시 서지 Pod 가 들어갈 자리가 있다.
+# replica 수와 노드 수가 같으면 DoNotSchedule 은 롤링을 막는다.
 topologySpreadConstraints:
   - maxSkew: 1
     topologyKey: kubernetes.io/hostname

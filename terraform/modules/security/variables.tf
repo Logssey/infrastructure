@@ -15,3 +15,11 @@ variable "security_mode" {
   EOT
   type        = string
 }
+
+variable "envoy_node_port" {
+  description = <<-EOT
+    Envoy Gateway NodePort. 2번 규칙에서 사용한다.
+    lb 모듈의 타겟 그룹, envoyproxy.yaml 의 nodePort 와 같은 값이어야 한다.
+  EOT
+  type        = number
+}

@@ -22,7 +22,8 @@ Backend Service                    api / websocket / frontend
 
 | 구간 | 관리 |
 | --- | --- |
-| CloudFront, ACM, WAF | Terraform (`modules/edge`) |
+| CloudFront, ACM, WAF | Terraform (`modules/edge`, 추후 추가) |
+| Route53 Hosted Zone | Terraform (`modules/edge`) |
 | Public NLB, 타겟 그룹, SG | Terraform (`modules/lb`, `modules/security`) |
 | NodePort ~ Backend | Kubernetes 매니페스트 (`k8s/platform/envoy-gateway`) |
 
@@ -100,6 +101,9 @@ Kubernetes 가 NodePort 를 임의 배정하면(30000~32767) 그때마다
 Terraform 을 수정해야 한다. Gateway 를 재생성할 때마다 포트가 바뀔 수 있어
 인프라와 워크로드가 서로를 기다리는 상태가 된다.
 
+이 값은 Terraform 의 `envoy_node_port` 변수, SG 2번 규칙,
+`envoyproxy.yaml` 세 곳이 공유한다. 상세는 `docs/05-loadbalancer.md` 참조.
+
 ### 고정 방법
 
 `EnvoyProxy` CRD 로 Envoy Gateway 가 생성하는 Service 를 커스터마이즈하고,
@@ -162,7 +166,7 @@ EKS 에서 일반적인 방식이다.
 **채택하지 않았다.**
 
 Public NLB 를 이미 Terraform 으로 구축하고 검증했다. 컨트롤러 방식으로
-전환하면 스프린트 3의 CloudFront 연결까지 영향을 받는다.
+전환하면 CloudFront 연결 구성까지 영향을 받는다.
 
 그리고 인프라 리소스를 Terraform 이 소유한다는 원칙이 설계 전반에 일관된다.
 컨트롤러가 LB 를 만들면 Terraform 상태 밖의 AWS 리소스가 생겨
@@ -224,12 +228,15 @@ CloudFront 연결 후 실제 헤더 값을 보고 설정한다.
 
 | 항목 | 상태 |
 | --- | --- |
-| 컨트롤플레인 | 2 Pod (worker-a, worker-c) |
-| 데이터플레인 | 3 Pod (worker 3대 분산) |
+| 컨트롤플레인 | 2 Pod |
+| 데이터플레인 | 3 Pod (Worker 3대에 분산) |
 | GatewayClass | Accepted |
 | Gateway | Programmed |
 | NodePort | 30080 고정 |
 | NLB 타겟 | Worker 3대 healthy |
+
+Pod 배치 노드는 스케줄러가 결정하므로 재시작 시 달라질 수 있다.
+`topologySpreadConstraints` 로 노드당 1개씩 분산되는 것만 보장한다.
 
 라우트가 없는 상태에서 노드 3대 모두 404 를 응답한다.
 Envoy 가 요청을 받았으나 매칭되는 HTTPRoute 가 없다는 뜻이며 정상이다.

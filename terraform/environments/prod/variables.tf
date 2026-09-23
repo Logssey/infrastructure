@@ -79,6 +79,28 @@ variable "private_data_subnet_cidrs" {
 }
 
 # ─────────────────────────────────────────────
+# Envoy Gateway NodePort
+# ─────────────────────────────────────────────
+
+variable "envoy_node_port" {
+  description = <<-EOT
+    Envoy Gateway 가 사용하는 NodePort.
+    Public NLB 타겟 그룹과 SG 2번 규칙이 이 값을 공유한다.
+
+    Kubernetes 쪽은 Terraform 이 관리하지 않으므로
+    k8s/platform/envoy-gateway/envoyproxy.yaml 의 nodePort 에
+    같은 값을 수동으로 맞춰야 한다.
+  EOT
+  type        = number
+  default     = 30080
+
+  validation {
+    condition     = var.envoy_node_port >= 30000 && var.envoy_node_port <= 32767
+    error_message = "NodePort 는 30000-32767 범위여야 한다."
+  }
+}
+
+# ─────────────────────────────────────────────
 # 보안 모드
 # ─────────────────────────────────────────────
 
@@ -137,4 +159,54 @@ variable "domain_name" {
   description = "서비스 도메인. 가비아에서 구매"
   type        = string
   default     = "re-used.store"
+}
+
+# ─────────────────────────────────────────────
+# RDS
+# ─────────────────────────────────────────────
+
+variable "rds_engine_version" {
+  description = <<-EOT
+    PostgreSQL 버전. 변경 시 rds_parameter_group_family 도 함께 맞춘다.
+    메이저 버전이 다르면 파라미터 그룹 family 가 달라진다.
+  EOT
+  type        = string
+  default     = "18.6"
+}
+
+variable "rds_parameter_group_family" {
+  description = "파라미터 그룹 family. rds_engine_version 의 메이저 버전과 일치해야 한다."
+  type        = string
+  default     = "postgres18"
+}
+
+variable "rds_instance_class" {
+  description = "RDS 인스턴스 클래스"
+  type        = string
+  default     = "db.t4g.small"
+}
+
+variable "rds_multi_az" {
+  description = "Multi-AZ 배치. 활성화 시 비용이 2배가 된다."
+  type        = bool
+  default     = false
+}
+
+# ─────────────────────────────────────────────
+# 엣지
+# ─────────────────────────────────────────────
+
+variable "waf_enabled" {
+  description = <<-EOT
+    CloudFront 에 WAF Web ACL 을 연결한다.
+    Web ACL 월 $5 + 관리형 룰 그룹당 $1 이 과금된다.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "cloudfront_price_class" {
+  description = "CloudFront 엣지 로케이션 범위"
+  type        = string
+  default     = "PriceClass_200"
 }
