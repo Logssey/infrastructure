@@ -59,6 +59,11 @@ module "compute" {
 module "edge" {
   source = "../../modules/edge"
 
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
+
   name_prefix = local.name_prefix
   domain_name = var.domain_name
 }
