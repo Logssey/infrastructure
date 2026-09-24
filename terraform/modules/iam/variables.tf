@@ -34,7 +34,7 @@ variable "github_repos" {
     main 브랜치에서 실행된 워크플로만 허용한다.
   EOT
   type        = list(string)
-  default     = ["reused-backend", "reused-frontend"]
+  default     = ["service-backend", "service-frontend"]
 }
 
 variable "ecr_repository_arns" {
