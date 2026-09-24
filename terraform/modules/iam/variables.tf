@@ -44,3 +44,8 @@ variable "ecr_repository_arns" {
   EOT
   type        = list(string)
 }
+
+variable "region" {
+  description = "AWS 리전. Secrets Manager ARN 범위 제한에 사용한다."
+  type        = string
+}
