@@ -36,6 +36,8 @@ module "iam" {
   name_prefix    = local.name_prefix
   security_mode  = var.security_mode
   tfstate_bucket = var.tfstate_bucket
+
+  ecr_repository_arns = module.ecr.repository_arns
 }
 
 # ─────────────────────────────────────────────
