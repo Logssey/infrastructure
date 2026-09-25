@@ -48,21 +48,18 @@ data "aws_iam_policy_document" "github_actions_assume" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # 워크플로가 어떤 이벤트로 실행되었는지에 따라 sub 값이 달라진다.
-    #   push       → repo:<org>/<repo>:ref:refs/heads/main
-    #   pull_request → repo:<org>/<repo>:pull_request
+    # 2026-07-15 이후 생성된 레포의 sub 클레임에는
+    # 조직 ID 와 레포 ID 가 접미사로 붙는다.
+    #   repo:Logssey@329835088/service-backend@1372604005:pull_request
     #
-    # CI 가 PR 이벤트에서 빌드하고 머지 시 리태깅하므로 둘 다 허용한다.
-    # pull_request 를 허용하면 해당 레포에 PR 을 올릴 수 있는 사람은
-    # 워크플로를 통해 ECR 에 push 할 수 있다.
-    # 조직 멤버로 제한되며, 더 좁히려면 GitHub Environment 와
-    # environment:<name> 조건을 사용한다.
+    # ID 는 변하지 않으나 레포를 추가할 때마다 조회해야 하므로 와일드카드로 둔다.
+    # `@*` 로 두면 Logssey 로 시작하는 다른 조직명(LogsseyFake 등)은 매칭되지 않는다.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
       values = concat(
-        [for repo in var.github_repos : "repo:${var.github_org}/${repo}:ref:refs/heads/main"],
-        [for repo in var.github_repos : "repo:${var.github_org}/${repo}:pull_request"],
+        [for repo in var.github_repos : "repo:${var.github_org}@*/${repo}@*:ref:refs/heads/main"],
+        [for repo in var.github_repos : "repo:${var.github_org}@*/${repo}@*:pull_request"],
       )
     }
   }
