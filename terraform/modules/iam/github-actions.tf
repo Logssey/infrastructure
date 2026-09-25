@@ -48,15 +48,22 @@ data "aws_iam_policy_document" "github_actions_assume" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # 어느 레포의 어느 브랜치에서 실행되었는지 확인한다.
-    # main 브랜치 외에는 assume 할 수 없다.
+    # 워크플로가 어떤 이벤트로 실행되었는지에 따라 sub 값이 달라진다.
+    #   push       → repo:<org>/<repo>:ref:refs/heads/main
+    #   pull_request → repo:<org>/<repo>:pull_request
+    #
+    # CI 가 PR 이벤트에서 빌드하고 머지 시 리태깅하므로 둘 다 허용한다.
+    # pull_request 를 허용하면 해당 레포에 PR 을 올릴 수 있는 사람은
+    # 워크플로를 통해 ECR 에 push 할 수 있다.
+    # 조직 멤버로 제한되며, 더 좁히려면 GitHub Environment 와
+    # environment:<name> 조건을 사용한다.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values = [
-        for repo in var.github_repos :
-        "repo:${var.github_org}/${repo}:ref:refs/heads/main"
-      ]
+      values = concat(
+        [for repo in var.github_repos : "repo:${var.github_org}/${repo}:ref:refs/heads/main"],
+        [for repo in var.github_repos : "repo:${var.github_org}/${repo}:pull_request"],
+      )
     }
   }
 }
