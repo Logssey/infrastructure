@@ -9,6 +9,7 @@
 | 영속성 | https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/ |
 | 메모리 최적화 | https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/memory-optimization/ |
 | 설정 파일 | https://redis.io/docs/latest/operate/oss_and_stack/management/config/ |
+| 공식 APT 저장소 | https://redis.io/docs/latest/operate/oss_and_stack/install/archive/install-redis/install-redis-on-linux/ |
 
 ---
 
@@ -19,7 +20,7 @@
 | 배치 | EC2 redis-a (t3.small, 10.20.10.30) |
 | 서브넷 | Private-App AZ-a |
 | SG | sg-redis |
-| 버전 | Redis 7.0.15 (Ubuntu 24.04 기본 패키지) |
+| 버전 | Redis 8.10.2 (공식 APT 저장소) |
 | 포트 | 6379 |
 | 설정 방식 | SSM 접속 후 수동 편집 |
 
@@ -51,18 +52,54 @@ Redis 는 그 기능들의 필요도가 낮아 관리형의 이점이 줄어든�
 **부수 효과** — EC2 는 OS 패키지 취약점과 설정 미비가 스캔 대상이 된다.
 관리형 서비스는 이 영역이 AWS 책임이라 스캔 재료가 제한적이다.
 
+### 공식 저장소에서 설치하는 이유
+
+Ubuntu 24.04 universe 저장소는 **7.0.15 에서 멈춰 있다.**
+
+채팅 게이트웨이가 쓰는 `node-redis` 는 연결 직후 `CLIENT SETINFO` 로
+라이브러리 이름과 버전을 서버에 알린다. 이 명령은 **Redis 7.2 에 도입**되어
+7.0 에서는 `unknown subcommand` 로 실패한다.
+
+`redis-cli` 는 이 명령을 보내지 않아 정상 접속되므로,
+서버는 멀쩡해 보이는데 애플리케이션만 붙지 못하는 상황이 된다.
+
+**패키지 이름이 다르다.**
+
+| 저장소 | 패키지 |
+| --- | --- |
+| Ubuntu universe | `redis-server` |
+| 공식 packages.redis.io | `redis` |
+
+둘을 섞으면 systemd 유닛과 설정 경로가 충돌한다.
+전환할 때는 한쪽을 완전히 제거한 뒤 설치한다.
+
 ---
 
 ## 용도
 
-두 가지를 한 인스턴스에서 처리한다.
+세 가지를 한 인스턴스에서 처리한다.
 
 | 용도 | 데이터 | 유실 시 영향 |
 | --- | --- | --- |
 | JWT 화이트리스트 | 발급된 토큰 목록 | **전체 사용자 로그아웃** |
 | 데이터 캐싱 | 조회 결과 등 | 일시적 응답 지연 |
+| 채팅 Pub/Sub | 실시간 이벤트 전달 | 실시간 수신 중단 |
 
-### 두 용도의 요구사항이 다르다
+### 채팅 Pub/Sub
+
+Spring API 가 메시지를 저장한 뒤 `reused:chat:room:{id}` 채널로 발행하고,
+채팅 게이트웨이(`reused-chat`)가 패턴 구독으로 받아 연결된 클라이언트에 전달한다.
+
+```
+Spring API ──PUBLISH──> Redis ──PSUBSCRIBE──> chat gateway ──Socket.IO──> 브라우저
+```
+
+Pub/Sub 은 저장되지 않는 휘발성 경로다. 구독자가 없는 동안 발행된 이벤트는
+사라지므로, 클라이언트는 재연결 후 REST 로 메시지 목록을 다시 읽는다.
+
+**이 용도 때문에 ACL 에 pubsub 권한이 필요하다.** 아래 인증 절 참조.
+
+### 용도별 요구사항이 다르다
 
 | 설정 | 캐시 | 토큰 저장소 |
 | --- | --- | --- |
@@ -70,6 +107,7 @@ Redis 는 그 기능들의 필요도가 낮아 관리형의 이점이 줄어든�
 | 영속성 | 불필요 | 필요 |
 
 경계는 **데이터를 버려도 되는가**다. 캐시는 버려도 되고 저장소는 안 된다.
+Pub/Sub 은 메모리에 남지 않아 이 구분과 무관하다.
 
 실무에서는 **인스턴스 분리를 권장한다.**
 `maxmemory-policy` 는 인스턴스 전역 설정이라, 캐시를 비우는 동작이
@@ -111,7 +149,7 @@ Redis 는 신뢰된 내부 네트워크를 전제로 설계되어 기본 설정�
 
 ### 인증 — ACL
 
-Redis 6 부터 ACL 을 지원한다. 본 환경은 7.0.15 이므로 사용 가능하다.
+Redis 6 부터 ACL 을 지원한다.
 
 | 방식 | 특징 |
 | --- | --- |
@@ -159,29 +197,63 @@ aclfile /etc/redis/acl-users.conf
 
 ```
 user default off
-user app on ><password> ~* &* +@read +@write +@connection -@dangerous
+user app on ><password> ~* &* +@read +@write +@connection -@dangerous +@pubsub
 ```
 
 | 항목 | 의미 |
 | --- | --- |
 | `default off` | 기본 계정 비활성화 |
-| `~*` | 모든 키 패턴 접근 |
-| `&*` | 모든 pub/sub 채널 |
+| `~*` | 모든 **키** 패턴 접근 |
+| `&*` | 모든 **채널** 패턴 접근 |
 | `+@read +@write` | 데이터 조작 명령 |
 | `+@connection` | CLIENT SETNAME 등. 일부 클라이언트가 연결 시 사용 |
+| `+@pubsub` | PUBLISH, SUBSCRIBE, PSUBSCRIBE 등 |
 | `-@dangerous` | FLUSHALL, FLUSHDB, KEYS, DEBUG 등 제외 |
+
+#### 채널 패턴과 명령 권한은 별개다
+
+**둘 다 있어야 Pub/Sub 이 동작한다.**
+
+| 항목 | 통제 대상 |
+| --- | --- |
+| `&*` | 어떤 채널에 접근해도 되는가 |
+| `+@pubsub` | 해당 명령을 실행할 수 있는가 |
+
+`&*` 만 있고 `+@pubsub` 이 없으면 채널은 열려 있으나 명령이 거부된다.
+문을 열어 두고 들어갈 자격은 주지 않은 셈이다.
+
+```
+NOPERM User app has no permissions to run the 'psubscribe' command
+```
+
+초기 구성은 `+@read +@write +@connection` 뿐이었고 pubsub 계열이 빠져 있었다.
+캐시와 세션만 쓰던 동안에는 드러나지 않다가 채팅 게이트웨이를 붙이면서 발견됐다.
+
+**증상이 두 단계로 나타났다.**
+
+| 주체 | 필요한 명령 | 실패 양상 |
+| --- | --- | --- |
+| 채팅 게이트웨이 | `PSUBSCRIBE` | 기동 실패. CrashLoopBackOff |
+| Spring API | `PUBLISH` | 예외를 삼키고 경고만 남김. 겉으로는 정상 |
+
+두 번째가 까다로웠다. 애플리케이션이 발행 실패를 `log.warn` 으로만 처리해
+서비스는 정상 동작하는 것처럼 보였고, 프론트의 30초 폴링이 화면을 갱신해
+실시간이 되는 것처럼 착각하게 만들었다.
 
 **권한 부여 방향이 중요하다.**
 
 | 방식 | 의미 |
 | --- | --- |
 | `+@all -@dangerous -@admin` | 전부 주고 위험한 것만 뺌 |
-| **`+@read +@write -@dangerous`** | 필요한 것만 줌 |
+| **`+@read +@write +@pubsub -@dangerous`** | 필요한 것만 줌 |
 
 최소 권한 원칙에 맞는 것은 후자다.
+다만 **필요한 카테고리를 빠뜨리면 조용히 실패한다**는 비용이 따른다.
+용도가 늘어날 때마다 ACL 을 함께 검토한다.
 
 `~*` 로 둔 것은 백엔드 키 네이밍이 확정되지 않았기 때문이다.
 확정되면 `~cache:* ~token:*` 식으로 좁힌다.
+채널도 마찬가지로 `&reused:chat:*` 로 좁힐 수 있다.
 
 #### INFO 는 부여하지 않는다
 
@@ -224,6 +296,37 @@ AWS 가 관여하지 않는다. 방식이 다른 이유다.
 노드 IAM Role 의 `AmazonSSMManagedInstanceCore` 로
 SecureString 복호화까지 가능하다(확인됨).
 
+#### 애플리케이션에는 Secrets Manager 로 전달한다
+
+Parameter Store 는 **생성·보관** 용도이고,
+Pod 가 읽는 경로는 **Secrets Manager** 다.
+
+| 저장소 | 키 | 소비 |
+| --- | --- | --- |
+| SSM Parameter Store | `/logssey/prod/redis/password` | Terraform, 수동 조회 |
+| Secrets Manager | `reused/prod/api` → `SPRING_DATA_REDIS_PASSWORD` | ESO → Pod |
+| Secrets Manager | `reused/prod/chat` → `CHAT_REDIS_URL` | ESO → Pod |
+
+**같은 값이 두 곳에 존재하므로 동기화가 깨질 수 있다.**
+실제로 Parameter Store 에만 있고 Secrets Manager 에 반영되지 않아
+`WRONGPASS` 로 기동이 막힌 적이 있다.
+
+비밀번호를 바꾸면 세 곳을 모두 갱신한다.
+
+1. ACL 파일
+2. SSM Parameter Store
+3. Secrets Manager (`reused/prod/api`, `reused/prod/chat`)
+
+채팅용 `CHAT_REDIS_URL` 은 비밀번호를 URL 에 포함하므로
+**URL 인코딩**이 필요하다.
+
+```bash
+python3 -c "
+import urllib.parse, sys
+print('redis://app:' + urllib.parse.quote(sys.argv[1], safe='') + '@10.20.10.30:6379')
+" "$PASSWORD"
+```
+
 ### 파일 권한
 
 `acl-users.conf` 에는 비밀번호가 평문으로 들어간다.
@@ -242,6 +345,45 @@ VPC 내부 통신이며 Private-App 서브넷에서만 접근 가능하다.
 TLS 를 적용하면 인증서 관리 부담이 생기므로 1차 구축에서는 제외한다.
 
 외부 노출이 필요해지거나 규제 요구가 생기면 `tls-port` 로 전환한다.
+
+---
+
+## 프로세스 관리
+
+### daemonize 와 systemd
+
+**Redis 8 의 systemd 유닛은 `Type=notify` 다.**
+
+```bash
+grep "^Type=" /usr/lib/systemd/system/redis-server.service
+# Type=notify
+```
+
+`Type=notify` 는 프로세스가 준비 완료를 systemd 에 알리기를 기다린다.
+`daemonize yes` 로 두면 Redis 가 포크한 뒤 부모가 종료되므로
+systemd 는 기동 실패로 판단하고 SIGTERM 을 보낸다.
+
+```
+redis-server.service: Failed with result 'protocol'
+```
+
+로그에는 Redis 가 정상 기동한 직후 종료되는 흔적이 남는다.
+
+```
+* Server initialized
+* Ready to accept connections
+signal-handler Received SIGTERM scheduling shutdown...
+```
+
+**설정은 아래와 같아야 한다.**
+
+```
+daemonize no
+supervised systemd
+```
+
+Ubuntu universe 패키지(7.0)는 `Type=forking` 이라 `daemonize yes` 가 맞았다.
+공식 패키지로 전환할 때 함께 바꾼다.
 
 ---
 
@@ -333,7 +475,7 @@ user_data 에 포함되어 있다.
 
 ## 설정 절차
 
-user_data 는 패키지 설치와 커널 파라미터 설정만 수행하고
+user_data 는 공식 저장소 등록, 패키지 설치, 커널 파라미터 설정만 수행하고
 **서비스를 중지·비활성 상태로 둔다.**
 기본 설정(`bind 127.0.0.1`, 인증 없음)으로 기동되는 것을 막기 위함이다.
 
@@ -390,12 +532,16 @@ cp /etc/redis/redis.conf /etc/redis/redis.conf.bak
 ```bash
 sed -i 's/^bind 127.0.0.1 -::1/bind 10.20.10.30/' /etc/redis/redis.conf
 sed -i 's/^appendonly no/appendonly yes/' /etc/redis/redis.conf
+sed -i 's/^daemonize yes/daemonize no/' /etc/redis/redis.conf
 ```
 
 없는 항목을 추가한다.
 
 ```bash
 cat >> /etc/redis/redis.conf << 'EOF'
+
+# systemd 유닛이 Type=notify 다. 포크하면 기동 실패로 처리된다.
+supervised systemd
 
 # 인스턴스 메모리 2GiB 중 절반.
 # 복제 버퍼, 클라이언트 출력 버퍼, 단편화, OS 가 나머지를 사용한다.
@@ -416,8 +562,14 @@ EOF
 ```bash
 cat > /etc/redis/acl-users.conf << EOF
 user default off
-user app on >$PASSWORD ~* &* +@read +@write +@connection -@dangerous
+user app on >$PASSWORD ~* &* +@read +@write +@connection -@dangerous +@pubsub
 EOF
+```
+
+붙여넣기로 작성하면 줄이 깨지는 경우가 있다. 반드시 결과를 확인한다.
+
+```bash
+cat /etc/redis/acl-users.conf
 ```
 
 ### 6. 권한 설정
@@ -435,11 +587,100 @@ systemctl start redis-server
 systemctl status redis-server --no-pager
 ```
 
+`Status: "Ready to accept connections"` 가 보이면 정상이다.
+
 기동에 실패하면 로그를 확인한다.
 `systemctl status` 만으로는 원인이 드러나지 않는다.
 
 ```bash
+journalctl -u redis-server -n 30 --no-pager
 tail -20 /var/log/redis/redis-server.log
+```
+
+---
+
+## 기존 인스턴스 업그레이드
+
+7.0(universe) 에서 8.x(공식) 로 옮기는 절차다.
+신규 구축은 user_data 가 처리하므로 이 절은 기존 노드에만 해당한다.
+
+### 사전 백업
+
+```bash
+mkdir -p /root/redis-backup
+cp /etc/redis/redis.conf /etc/redis/acl-users.conf /root/redis-backup/
+cp /usr/lib/systemd/system/redis-server.service /root/redis-backup/
+```
+
+### 주의 — purge 가 데이터 디렉터리까지 지운다
+
+```bash
+apt remove --purge -y redis-server redis-tools
+```
+
+이 명령은 `/etc/redis` 와 **`/var/lib/redis` 를 함께 삭제한다.**
+RDB 와 AOF 파일이 사라진다.
+
+세션과 캐시만 담고 있다면 감수할 수 있으나
+**미리 알고 진행해야 한다.** 보존이 필요하면 먼저 복사한다.
+
+```bash
+cp -a /var/lib/redis /root/redis-data-backup
+```
+
+### 절차
+
+```bash
+# 1. 중지
+systemctl stop redis-server
+
+# 2. 기존 패키지 제거
+apt remove --purge -y redis-server redis-tools
+
+# 3. 공식 저장소 등록
+apt install -y gnupg lsb-release
+curl -fsSL https://packages.redis.io/gpg \
+  | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" \
+  > /etc/apt/sources.list.d/redis.list
+apt update
+
+# 4. 설치. 설치 직후 기본 설정으로 자동 기동되므로 곧바로 멈춘다
+apt install -y redis
+systemctl stop redis-server
+redis-server --version
+
+# 5. 설정 복원
+cp /root/redis-backup/redis.conf /etc/redis/redis.conf
+cp /root/redis-backup/acl-users.conf /etc/redis/acl-users.conf
+chown redis:redis /etc/redis/redis.conf /etc/redis/acl-users.conf
+chmod 640 /etc/redis/redis.conf /etc/redis/acl-users.conf
+
+# 6. Redis 8 요구사항 반영
+sed -i 's/^daemonize yes/daemonize no/' /etc/redis/redis.conf
+grep -q "^supervised" /etc/redis/redis.conf || echo "supervised systemd" >> /etc/redis/redis.conf
+
+# 7. ACL 에 +@pubsub 추가. 파일을 직접 편집하고 결과를 확인한다
+
+# 8. 기동
+systemctl start redis-server
+systemctl status redis-server --no-pager
+```
+
+### 업그레이드 후 확인
+
+```bash
+redis-cli -h 10.20.10.30 --user app --askpass client setinfo lib-name node-redis
+```
+
+`OK` 가 나와야 한다. 7.0 에서는 `unknown subcommand` 였다.
+
+애플리케이션 Pod 는 별도로 재시작한다.
+Redis 재시작으로 커넥션이 끊기지만 환경변수는 기동 시 한 번만 읽으므로,
+비밀번호나 접속 정보가 바뀌었다면 재시작이 필요하다.
+
+```bash
+kubectl -n reused rollout restart deployment reused-api reused-chat
 ```
 
 ---
@@ -474,6 +715,25 @@ redis-cli -h 10.20.10.30 --user app --pass "$PASSWORD" GET test:key
 redis-cli -h 10.20.10.30 --user app --pass "$PASSWORD" DEL test:key
 ```
 
+### Pub/Sub
+
+**구독과 발행을 모두 확인한다.** 한쪽만 되는 경우가 있다.
+
+터미널 하나에서 구독한다.
+
+```bash
+redis-cli -h 10.20.10.30 --user app --askpass psubscribe 'reused:chat:room:*'
+```
+
+다른 터미널에서 발행한다.
+
+```bash
+redis-cli -h 10.20.10.30 --user app --askpass publish 'reused:chat:room:1' 'test'
+```
+
+구독 쪽에 `pmessage` 가 찍히면 정상이다.
+`NOPERM` 이 나오면 ACL 에 `+@pubsub` 이 빠진 것이다.
+
 ### 권한 차단
 
 ```bash
@@ -489,7 +749,7 @@ redis-cli -h 10.20.10.30 --user app --pass "$PASSWORD" CONFIG GET maxmemory
 `CONFIG` 와 `INFO` 가 차단되어 있으므로 서버에서 파일을 직접 확인한다.
 
 ```bash
-grep -E "^(bind|appendonly|appendfsync|maxmemory|aclfile)" /etc/redis/redis.conf
+grep -E "^(bind|daemonize|supervised|appendonly|appendfsync|maxmemory|aclfile)" /etc/redis/redis.conf
 ls -la /var/lib/redis/
 ```
 
@@ -501,7 +761,7 @@ Control Plane 노드에서 실행한다.
 
 ```bash
 kubectl run redistest --restart=Never \
-  --image=redis:7-alpine \
+  --image=redis:8-alpine \
   -- redis-cli -h 10.20.10.30 --user app --pass '<password>' ping
 
 kubectl get pod redistest
@@ -535,8 +795,10 @@ kubectl delete pod redistest
 | --- | --- |
 | SSH 경로 | `sg-redis` 에 SSH 인바운드 규칙이 없다 |
 | 공개키 | Kubespray 공개키 배포 시 Redis 노드는 제외했다 |
+| 서브넷 계층 | Private-App 에 있다. 저장소이므로 Private-Data 가 맞다 |
+| 비밀번호 이중 관리 | Parameter Store 와 Secrets Manager 에 같은 값이 존재한다 |
 
-**Ansible 로 설정을 관리하려면 둘 다 필요하다.**
+**SSH 는 Ansible 로 설정을 관리하려면 둘 다 필요하다.**
 현재는 SSM 으로 접속해 수동 설정하므로 문제가 없다.
 
 Ansible 전환 시 아래를 추가한다.
@@ -552,6 +814,10 @@ resource "aws_vpc_security_group_ingress_rule" "redis_ssh_from_k8s_node" {
 }
 ```
 
+**서브넷 계층**은 RDS 와 같은 Private-Data 로 옮기는 것이 일관적이다.
+현재는 SG 로 Worker 만 허용하고 있어 실질적 위험은 낮으나,
+계층 방어 관점에서는 한 겹이 부족하다. 재생성 시 함께 처리한다.
+
 ---
 
 ## 확장 항목
@@ -560,6 +826,7 @@ resource "aws_vpc_security_group_ingress_rule" "redis_ssh_from_k8s_node" {
 | --- | --- |
 | 모니터링 전용 ACL 계정 | Prometheus exporter 등 도입 시 |
 | 키 패턴 제한 (`~cache:* ~token:*`) | 백엔드 키 네이밍 확정 후 |
+| 채널 패턴 제한 (`&reused:chat:*`) | 채널 네이밍 확정 후 |
 | 인스턴스 분리 (캐시 / 토큰) | 메모리 사용량이 maxmemory 에 근접할 때 |
 | Ansible 설정 관리 | 노드가 늘거나 재현성이 필요할 때 |
 | TLS | 외부 노출 또는 규제 요구 발생 시 |
