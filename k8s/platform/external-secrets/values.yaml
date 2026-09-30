@@ -1,0 +1,45 @@
+# External Secrets Operator — Helm values
+#
+# 차트   external-secrets/external-secrets 2.11.0
+# 설치   external-secrets
+#
+# AWS Secrets Manager 의 값을 Kubernetes Secret 으로 동기화한다.
+# Git 에는 참조만 남고 값은 들어가지 않는다.
+#
+# 오퍼레이터와 ClusterSecretStore 는 여기서 설치한다.
+# Argo CD 가 ExternalSecret 을 적용하려면 CRD 가 먼저 등록되어야 하고,
+# 애플리케이션보다 앞서 존재해야 하기 때문이다.
+# 애플리케이션별 ExternalSecret 정의는 gitops 레포에 둔다.
+#
+# 인증은 노드 IAM Role 을 쓴다.
+# IRSA 가 없어 해당 노드의 모든 Pod 가 같은 권한을 갖는다.
+# ServiceAccount 단위로 제한하려면 OIDC provider 구성이 필요하다.
+
+installCRDs: true
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+webhook:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+certController:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 128Mi

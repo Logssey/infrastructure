@@ -9,6 +9,8 @@
 # IMDSv2 강제와 hop limit 제한으로 완화한다. (T2)
 # ─────────────────────────────────────────────
 
+data "aws_caller_identity" "current" {}
+
 data "aws_iam_policy_document" "ec2_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -74,6 +76,49 @@ resource "aws_iam_role_policy" "deny_tfstate" {
       ]
     }]
   })
+}
+
+# ─────────────────────────────────────────────
+# Secrets Manager 읽기
+#
+# External Secrets Operator 가 AWS Secrets Manager 의 값을
+# Kubernetes Secret 으로 동기화할 때 사용한다.
+#
+# 한계: IRSA 가 없으므로 노드 Role 에 붙인다.
+#       해당 노드의 모든 Pod 가 같은 권한을 갖게 된다.
+#       ServiceAccount 단위로 제한하려면 OIDC provider 를 구성해
+#       IRSA 로 전환해야 한다.
+# ─────────────────────────────────────────────
+
+data "aws_iam_policy_document" "secrets_read" {
+  statement {
+    sid    = "SecretsManagerRead"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+
+    # 리소스를 좁히려면 시크릿 ARN 을 나열해야 하나,
+    # 애플리케이션 시크릿이 늘어날 때마다 Terraform 을 수정해야 한다.
+    # 대신 리전과 계정으로 범위를 제한한다.
+    resources = ["arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:*"]
+  }
+
+  statement {
+    sid    = "SecretsManagerList"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:ListSecrets",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "secrets_read" {
+  name   = "${var.name_prefix}-secrets-read"
+  role   = aws_iam_role.node.id
+  policy = data.aws_iam_policy_document.secrets_read.json
 }
 
 # ─────────────────────────────────────────────

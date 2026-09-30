@@ -1,0 +1,82 @@
+# Argo CD — Helm values
+#
+# 차트   argo/argo-cd 10.9.2 (Argo CD v3.5.3)
+# 설치   argocd
+#
+# gitops 레포(Logssey/gitops)의 apps/ 아래를 감시해 클러스터 상태를 동기화한다.
+# Argo CD 자신은 Argo CD 로 관리할 수 없으므로 여기서 Helm 으로 설치한다.
+#
+# 설치 후 AppProject 와 ApplicationSet 을 한 번 적용하면
+# 그 다음부터 apps/ 아래 디렉터리가 자동으로 Application 이 된다.
+#
+# Control Plane 은 메모리가 55~62% 로 여유가 적어 nodeSelector 를 두지 않는다.
+# CP 에 NoSchedule taint 가 있으므로 스케줄러가 Worker 에 배치한다.
+
+configs:
+  params:
+    # 서버가 TLS 없이 동작한다.
+    # 지금은 포트포워딩으로만 접근하며, 외부 노출 시 Gateway 가 TLS 를 처리한다.
+    # 이 값이 true 라야 Gateway API 로 노출할 때 h2c 백엔드가 성립한다.
+    server.insecure: true
+
+controller:
+  # Application 상태를 조정하는 컴포넌트.
+  # 여러 replica 는 샤딩 설정이 필요하므로 단일로 둔다.
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+server:
+  replicas: 2
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+  service:
+    type: ClusterIP
+
+repoServer:
+  # Helm 차트를 렌더링하는 컴포넌트. 동기화 부하를 받는다.
+  replicas: 2
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+applicationSet:
+  replicas: 1
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+redis:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# SSO 를 쓰지 않는다. 외부 노출 시 GitHub OAuth 를 붙이면서 활성화한다.
+dex:
+  enabled: false
+
+# 알림은 관측성 스택과 함께 구성한다.
+notifications:
+  enabled: false
