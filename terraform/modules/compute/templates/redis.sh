@@ -12,7 +12,25 @@ set -euxo pipefail
 # ─────────────────────────────────────────────
 
 apt-get update
-apt-get install -y redis-server unzip curl
+apt-get install -y unzip curl gnupg lsb-release
+
+# ─────────────────────────────────────────────
+# Redis 는 공식 저장소에서 설치한다.
+#
+# Ubuntu 24.04 universe 저장소는 7.0.15 에서 멈춰 있다.
+# 채팅 게이트웨이가 쓰는 node-redis 는 연결 직후 CLIENT SETINFO 를
+# 보내는데, 이 명령은 7.2 에 도입되어 7.0 에서는 실패한다.
+#
+# 패키지 이름이 다르다. universe 는 redis-server, 공식은 redis 다.
+# 둘을 섞으면 systemd 유닛과 설정 경로가 충돌하므로 공식 쪽만 쓴다.
+# ─────────────────────────────────────────────
+curl -fsSL https://packages.redis.io/gpg \
+  | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" \
+  > /etc/apt/sources.list.d/redis.list
+
+apt-get update
+apt-get install -y redis
 
 # AWS CLI
 # Ubuntu 24.04 저장소에서 awscli 패키지가 제거되어 공식 설치 스크립트를 사용한다.

@@ -34,8 +34,11 @@ module "iam" {
   source = "../../modules/iam"
 
   name_prefix    = local.name_prefix
+  region         = var.region
   security_mode  = var.security_mode
   tfstate_bucket = var.tfstate_bucket
+
+  ecr_repository_arns = module.ecr.repository_arns
 }
 
 # ─────────────────────────────────────────────
@@ -141,4 +144,14 @@ module "edge" {
 
   waf_enabled = var.waf_enabled
   price_class = var.cloudfront_price_class
+}
+
+# ─────────────────────────────────────────────
+# CI/CD
+# ─────────────────────────────────────────────
+
+module "ecr" {
+  source = "../../modules/ecr"
+
+  name_prefix = local.name_prefix
 }

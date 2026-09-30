@@ -145,3 +145,13 @@ output "waf_web_acl_arn" {
   description = "WAF Web ACL ARN. waf_enabled 가 false 면 null"
   value       = module.edge.waf_web_acl_arn
 }
+
+output "ecr_repository_urls" {
+  description = "CI 워크플로에서 push 대상으로 사용한다."
+  value       = module.ecr.repository_urls
+}
+
+output "github_actions_role_arn" {
+  description = "각 앱 레포의 Secret 에 AWS_ROLE_ARN 으로 등록한다."
+  value       = module.iam.github_actions_role_arn
+}

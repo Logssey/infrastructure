@@ -101,6 +101,136 @@ cd ~/kubespray && source .venv/bin/activate
 
 ---
 
+## 생성된 AWS 리소스
+
+Terraform 이 관리하는 리소스 목록이다.
+CI/CD 와 관측성 스택은 클러스터 내부에 배포되므로 AWS 리소스가 아니다.
+
+### 네트워크
+
+| 리소스 | 수량 | 역할 |
+| --- | --- | --- |
+| VPC | 1 | 10.20.0.0/16 |
+| Public Subnet | 3 | NLB, NAT Gateway |
+| Private-App Subnet | 3 | Control Plane, Worker, Redis |
+| Private-Etcd Subnet | 3 | external etcd |
+| Private-Data Subnet | 3 | RDS Subnet Group |
+| Internet Gateway | 1 | Public 서브넷 아웃바운드 |
+| NAT Gateway | 1 | Private 서브넷 아웃바운드 (AZ-a) |
+| Route Table | 4 | 계층별 라우팅 |
+| S3 Gateway Endpoint | 1 | S3 트래픽을 NAT 우회 |
+
+### 보안
+
+| 리소스 | 수량 | 역할 |
+| --- | --- | --- |
+| Security Group | 8 | public-nlb, internal-nlb, control-plane, etcd, worker, k8s-node, rds, redis |
+| IAM Role | 1 | EC2 노드 공통 |
+| 인스턴스 프로파일 | 1 | Role 을 EC2 에 부착 |
+
+### 컴퓨트
+
+| 리소스 | 수량 | 타입 | 역할 |
+| --- | --- | --- | --- |
+| Control Plane | 3 | t3.medium | kube-apiserver, scheduler, controller-manager |
+| external etcd | 3 | t3.small | 클러스터 상태 저장 |
+| Worker | 3 | t3.large | 애플리케이션 워크로드 |
+| Redis | 1 | t3.small | 캐시, JWT 화이트리스트 |
+
+### 데이터
+
+| 리소스 | 수량 | 역할 |
+| --- | --- | --- |
+| RDS PostgreSQL | 1 | db.t4g.small, 18.6 |
+| DB Subnet Group | 1 | Private-Data ×3 |
+| DB Parameter Group | 1 | 커스텀 (현재 기본값 유지) |
+| Secrets Manager 시크릿 | 1 | RDS 마스터 비밀번호 (AWS 관리) |
+| SSM Parameter | 1 | Redis ACL 비밀번호 (SecureString) |
+
+### 로드밸런서
+
+| 리소스 | 수량 | 역할 |
+| --- | --- | --- |
+| Internal NLB | 1 | kubelet·kubectl → apiserver |
+| Public NLB | 1 | CloudFront → Envoy Gateway |
+| Target Group | 2 | tg-api (6443), tg-envoy (30080) |
+
+### 엣지
+
+| 리소스 | 수량 | 역할 |
+| --- | --- | --- |
+| Route53 Hosted Zone | 1 | re-used.store |
+| Route53 레코드 | 7 | 서비스 5, ACM 검증 2 |
+| ACM 인증서 | 2 | us-east-1 (CloudFront), ap-northeast-1 (NLB) |
+| CloudFront Distribution | 1 | 캐싱, TLS 종단, WAF 연결 |
+| WAF Web ACL | 1 | 관리형 룰 3개, Count 모드 |
+
+### Terraform 외부
+
+| 리소스 | 역할 |
+| --- | --- |
+| S3 버킷 `logssey-prod-s3-tfstate` | 상태 파일 저장. 수동 생성 |
+
+---
+
+## 콘솔 확인 위치
+
+리전은 별도 표기가 없으면 **ap-northeast-1 (도쿄)** 다.
+
+| 대상 | 콘솔 경로 |
+| --- | --- |
+| VPC, 서브넷, 라우팅 | VPC → Your VPCs / Subnets / Route tables |
+| NAT Gateway | VPC → NAT gateways |
+| S3 Endpoint | VPC → Endpoints |
+| Security Group | VPC → Security groups |
+| EC2 인스턴스 | EC2 → Instances |
+| EBS 볼륨 | EC2 → Volumes |
+| NLB, 타겟 그룹 | EC2 → Load balancers / Target groups |
+| IAM Role | IAM → Roles → `logssey-prod-role-node` |
+| RDS | RDS → Databases → `logssey-prod-rds` |
+| RDS 파라미터 | RDS → Parameter groups → `logssey-prod-pg18` |
+| Secrets Manager | Secrets Manager → `rds!db-...` |
+| SSM Parameter | Systems Manager → Parameter Store |
+| Route53 | Route 53 → Hosted zones → `re-used.store` |
+| ACM (NLB용) | Certificate Manager (ap-northeast-1) |
+| **ACM (CloudFront용)** | Certificate Manager **(us-east-1)** |
+| CloudFront | CloudFront → Distributions |
+| **WAF** | WAF & Shield → Web ACLs **(Global / us-east-1)** |
+
+**CloudFront 와 WAF 는 us-east-1 에서 조회한다.**
+CloudFront 용 ACM 인증서와 CLOUDFRONT scope 의 Web ACL 은
+리전이 고정되어 있다.
+
+### 상태 점검
+
+```bash
+cd terraform/environments/prod
+
+# 노드
+aws ec2 describe-instances \
+  --filters "Name=tag:Project,Values=logssey" "Name=instance-state-name,Values=running" \
+  --region ap-northeast-1 \
+  --query 'Reservations[].Instances[].[Tags[?Key==`Name`]|[0].Value,InstanceType,State.Name]' \
+  --output table
+
+# RDS
+aws rds describe-db-instances \
+  --db-instance-identifier $(terraform output -raw rds_instance_id) \
+  --region ap-northeast-1 \
+  --query 'DBInstances[0].[DBInstanceStatus,EngineVersion]' --output text
+
+# NLB 타겟
+aws elbv2 describe-target-health \
+  --target-group-arn $(terraform output -raw public_target_group_arn) \
+  --region ap-northeast-1 \
+  --query 'TargetHealthDescriptions[].[Target.Id,TargetHealth.State]' --output table
+
+# 외부 진입 경로
+curl -sS -o /dev/null -w "%{http_code}\n" https://re-used.store/
+```
+
+---
+
 ## 상태 관리
 
 ### 상태 파일이란
@@ -140,7 +270,9 @@ DynamoDB 잠금 테이블은 사용하지 않는다.
 `dynamodb_table` 인자는 deprecated이며, Terraform 1.10부터 지원되는
 S3 조건부 쓰기 기반 `use_lockfile = true`를 사용한다.
 
-**상태 파일에는 RDS·Redis 비밀번호가 평문으로 저장된다.**
+**상태 파일에는 민감 정보가 포함될 수 있다.**
+RDS 마스터 비밀번호는 `manage_master_user_password` 로 AWS 가 관리해
+상태 파일에 남지 않으나, 다른 리소스의 속성은 평문으로 기록된다.
 노드 IAM Role 에 이 버킷에 대한 명시적 Deny 정책을 부착해
 EC2 에서 접근할 수 없도록 한다. `docs/03-iam.md` 참조.
 
@@ -239,6 +371,9 @@ Terraform 이 매번 변경으로 감지해 plan 에 계속 나타난다.
 SG 개방 규칙에는 `Tier = T2-remove` 태그를 추가로 부착한다.
 제거 대상을 콘솔과 CLI 에서 식별하기 위함이다. `docs/02-security.md` 참조.
 
+provider 를 두 개 쓰므로 `default_tags` 도 각각 선언해야 한다.
+us-east-1 provider 는 CloudFront 용 ACM 인증서와 WAF Web ACL 에 쓰인다.
+
 태그로 리소스를 조회할 수 있다.
 
 ```bash
@@ -281,6 +416,9 @@ strict 전환 후 주요 경로 점검이 필요하다.
 | Ingress | Envoy Gateway v1.9.1 (Gateway API v1.6.1) |
 | 스토리지 | AWS EBS CSI Driver (gp3 기본 StorageClass) |
 | 메트릭 | metrics-server |
+| DB | RDS PostgreSQL 18.6 |
+| 캐시 | Redis 7.0.15 (EC2) |
+| CDN | CloudFront + WAF |
 | 도메인 | re-used.store |
 
 ## 디렉터리
@@ -293,16 +431,25 @@ terraform/
     security/           Security Group, 규칙
     iam/                IAM Role, 인스턴스 프로파일
     compute/            EC2, user_data
+    rds/                RDS, Subnet Group, 파라미터 그룹
+    dns/                Route53 Hosted Zone, ACM 인증서
     lb/                 Internal NLB, Public NLB
-    edge/               Route53 Hosted Zone
+    edge/               CloudFront, WAF, 서비스 레코드
 kubespray/              클러스터 인벤토리 및 변수
 k8s/
   platform/             애드온 Helm values, 매니페스트
 docs/                   구현 명세
+  concepts/             기술 개념과 선택 근거
   troubleshooting/      구축 중 문제 해결 기록
 ```
 
+**엣지 계층은 세 모듈로 나뉜다.**
+`dns → lb → edge` 순서로 의존하며, 순환 참조를 피하기 위한 구조다.
+상세는 `docs/10-edge.md` 참조.
+
 ## 문서
+
+### 구현 명세
 
 | 파일 | 내용 |
 | --- | --- |
@@ -313,6 +460,164 @@ docs/                   구현 명세
 | [05-loadbalancer.md](docs/05-loadbalancer.md) | NLB 구성, Client IP Preservation |
 | [06-kubespray.md](docs/06-kubespray.md) | 클러스터 구축, Cilium 설정 |
 | [07-ingress.md](docs/07-ingress.md) | 진입 경로, Envoy Gateway, NodePort 고정 |
+| [08-rds.md](docs/08-rds.md) | RDS PostgreSQL, 백업, 비밀번호 관리 |
+| [09-redis.md](docs/09-redis.md) | Redis EC2, ACL, 메모리·영속성 |
+| [10-edge.md](docs/10-edge.md) | ACM, CloudFront, WAF, Route53 |
+
+### 개념
+
+기술이 무엇이고 왜 그것을 골랐는지 다룬다.
+구축 중 막혔거나 선택 근거가 필요했던 영역만 기록한다.
+
+| 파일 | 내용 |
+| --- | --- |
+| [concepts/](docs/concepts/) | 목록과 작성 기준 |
+| [concepts/cni.md](docs/concepts/cni.md) | Pod 네트워킹, Overlay 와 Native routing, CNI 비교 |
+
+### 절차
+
+| 파일 | 내용 |
+| --- | --- |
 | [k8s/README.md](k8s/README.md) | 애드온 설치 절차와 검증 |
 | [kubespray/README.md](kubespray/README.md) | 인벤토리 반영 절차 |
-| [troubleshooting/](docs/troubleshooting/) | 구축 중 발생한 문제와 해결 과정 |
+
+### 트러블슈팅
+
+구축 중 발생한 문제와 진단 과정. 결론뿐 아니라 오판한 과정도 기록한다.
+
+| # | 제목 | 원인 |
+| --- | --- | --- |
+| [README](docs/troubleshooting/) | 목록, 분류, 진단 참고 명령 | |
+| [01](docs/troubleshooting/01-etcd-worker-certs.md) | 워커 노드 etcd 인증서 미생성 | Kubespray `gen_certs` 평가 순서 |
+| [02](docs/troubleshooting/02-etcd-client-sg.md) | etcd 클러스터 헬스체크 실패 | SG — 멤버 간 2379 누락 |
+| [03](docs/troubleshooting/03-cilium-cni-bin-permission.md) | Cilium mount-cgroup 실패 | `/opt/cni/bin` 소유자, `DAC_OVERRIDE` |
+| [04](docs/troubleshooting/04-kube-proxy-ipvs-conflict.md) | Service 접속 불가 (병행 구성) | kube-proxy IPVS ↔ eBPF 충돌 |
+| [05](docs/troubleshooting/05-apiserver-sg-kpr.md) | Service 접속 불가 (replacement) | SG — Worker → CP 6443 누락 |
+| [06](docs/troubleshooting/06-kubelet-api-sg.md) | kubelet API 접근 불가 | SG — 10250 방향 누락 |
+| [07](docs/troubleshooting/07-iptables-corruption-l7.md) | L7 NetworkPolicy 미동작 | iptables 직접 조작으로 Cilium 상태 손상 |
+| [08](docs/troubleshooting/08-envoy-gateway-nodeport.md) | Envoy Gateway NodePort 고정 실패 | StrategicMerge 병합 키, DoNotSchedule 교착 |
+
+
+---
+
+## 임시 — 개발 단계 전용
+
+**서비스 배포 전까지만 유효한 내용이다.**
+애플리케이션이 올라가면 이 절을 제거한다.
+
+### 비용 절감을 위한 노드 중지
+
+작업하지 않는 동안 EC2 를 중지해 비용을 줄일 수 있다.
+중지 중에는 인스턴스 시간 요금이 발생하지 않는다.
+
+
+EBS, NLB, NAT Gateway, Route53, CloudFront 는 중지해도 과금된다.
+
+**RDS 는 최대 7일까지만 중지된다.** 이후 AWS 가 자동으로 시작한다.
+
+#### 중지 — 역순
+
+| 순서 | 대상 |
+| --- | --- |
+| 1 | worker-a, worker-c, worker-d |
+| 2 | cp-a, cp-c, cp-d |
+| 3 | etcd-a, etcd-c, etcd-d |
+
+Redis 는 클러스터 구성원이 아니므로 순서와 무관하다.
+
+#### 시작 — 정순
+
+**각 단계를 확인한 뒤 다음으로 넘어간다.**
+인스턴스가 `running` 이어도 OS 부팅과 에이전트 기동에 시간이 걸리므로
+상태 검사 2/2 통과를 기다린다.
+
+**1. etcd 3대**
+
+```bash
+ETCD_A=$(terraform output -json etcd_instance_ids \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)[0])')
+
+aws ssm start-session --target $ETCD_A --region ap-northeast-1
+```
+
+```bash
+sudo su -
+set -a; . /etc/etcd.env; set +a
+/usr/local/bin/etcdctl endpoint health --cluster
+```
+
+3대 전부 `is healthy` 여야 한다.
+
+**2. Control Plane 3대**
+
+```bash
+CP_A=$(terraform output -json control_plane_instance_ids \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)[0])')
+
+aws ssm start-session --target $CP_A --region ap-northeast-1
+```
+
+```bash
+sudo su - ubuntu
+kubectl get nodes
+```
+
+CP 3대가 Ready 가 될 때까지 3~5분 걸린다.
+Worker 는 `NotReady`, 워커에 있던 Pod 는 `Unknown` 으로 보이는 것이 정상이다.
+
+**3. Worker 3대**
+
+```bash
+kubectl get nodes
+kubectl get pods -A | grep -v Running | grep -v Completed
+```
+
+6대 Ready 가 되고 1~2분 뒤 Pod 가 자동 복구된다.
+
+#### 복구 동작
+
+**수동 개입이 필요하지 않다.** 검증 완료(2026-09-23).    
+노드 시작 → kubelet 등록 → Ready    
+→ kubelet 이 할당된 Pod 목록 조회    
+→ 컨테이너 재시작 (RESTARTS +1)    
+→ Service 엔드포인트 복구    
+→ NLB 헬스체크 통과    
+
+
+Pod 이름과 AGE 는 유지된다. 스케줄러가 새로 배치하는 것이 아니라
+kubelet 이 같은 Pod 정의로 컨테이너만 다시 띄우기 때문이다.
+
+`/opt/cni/bin` 소유자도 디스크에 저장되므로 유지된다.
+
+#### 확인
+
+```bash
+cd terraform/environments/prod
+
+aws elbv2 describe-target-health \
+  --target-group-arn $(terraform output -raw public_target_group_arn) \
+  --region ap-northeast-1 \
+  --query 'TargetHealthDescriptions[].[Target.Id,TargetHealth.State]' --output table
+
+curl -sS -o /dev/null -w "%{http_code}\n" "https://re-used.store/?t=$(date +%s)"
+```
+
+**쿼리스트링으로 CloudFront 캐시를 우회한다.**
+캐시가 남아 있으면 오리진이 죽어도 정상 응답이 오므로
+복구 시점을 정확히 판단할 수 없다.
+
+### 테스트용 nginx
+
+전체 경로 검증을 위해 임시로 배포했다.
+
+| 리소스 | 이름 | 네임스페이스 |
+| --- | --- | --- |
+| Deployment | nginx-test | default |
+| Service | nginx-test | default |
+| HTTPRoute | nginx-test | default |
+
+```bash
+kubectl delete deployment,service,httproute nginx-test
+```
+
+애플리케이션 배포 시 제거한다.

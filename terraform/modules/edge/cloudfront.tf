@@ -32,6 +32,36 @@ data "aws_cloudfront_origin_request_policy" "all_viewer" {
   name = "Managed-AllViewer"
 }
 
+# ── Origin Request Policy — Host 만 전달 ──
+#
+# CloudFront 는 기본적으로 Host 를 오리진 도메인(origin.re-used.store)으로
+# 바꿔서 보낸다. 그러면 HTTPRoute 의 hostnames 와 매칭되지 않아 404 가 난다.
+#
+# 뷰어가 보낸 Host 를 그대로 전달해야
+# 애플리케이션이 쿠키 도메인과 리다이렉트 URL 을 올바르게 만든다.
+#
+# 정적 자산 요청에 쿠키를 함께 보낼 이유가 없어
+# AllViewer 대신 Host 만 전달하는 정책을 둔다.
+resource "aws_cloudfront_origin_request_policy" "host_only" {
+  name    = "${var.name_prefix}-host-only"
+  comment = "뷰어의 Host 헤더만 오리진으로 전달"
+
+  headers_config {
+    header_behavior = "whitelist"
+    headers {
+      items = ["Host"]
+    }
+  }
+
+  cookies_config {
+    cookie_behavior = "none"
+  }
+
+  query_strings_config {
+    query_string_behavior = "none"
+  }
+}
+
 resource "aws_cloudfront_distribution" "main" {
   enabled         = true
   is_ipv6_enabled = true
@@ -73,8 +103,9 @@ resource "aws_cloudfront_distribution" "main" {
     allowed_methods = ["GET", "HEAD", "OPTIONS"]
     cached_methods  = ["GET", "HEAD"]
 
-    cache_policy_id = data.aws_cloudfront_cache_policy.caching_optimized.id
-    compress        = true
+    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_optimized.id
+    origin_request_policy_id = aws_cloudfront_origin_request_policy.host_only.id
+    compress                 = true
   }
 
   # ── /api/* ──
@@ -126,8 +157,9 @@ resource "aws_cloudfront_distribution" "main" {
     allowed_methods = ["GET", "HEAD"]
     cached_methods  = ["GET", "HEAD"]
 
-    cache_policy_id = data.aws_cloudfront_cache_policy.caching_optimized.id
-    compress        = true
+    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_optimized.id
+    origin_request_policy_id = aws_cloudfront_origin_request_policy.host_only.id
+    compress                 = true
   }
 
   # ── 인증서 ──
