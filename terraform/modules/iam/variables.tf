@@ -49,3 +49,15 @@ variable "region" {
   description = "AWS 리전. Secrets Manager ARN 범위 제한에 사용한다."
   type        = string
 }
+variable "s3_bucket_arns" {
+  description = <<-EOT
+    노드 Role 이 접근할 S3 버킷 ARN 목록.
+
+    이미지 업로드와 Loki 로그 저장에 쓴다.
+    여기 없는 버킷에는 접근할 수 없다.
+
+    Presigned URL 발급은 이 권한으로 서명하므로,
+    버킷을 추가하면 여기에도 넣어야 한다.
+  EOT
+  type        = list(string)
+}

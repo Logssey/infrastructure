@@ -39,6 +39,13 @@ module "iam" {
   tfstate_bucket = var.tfstate_bucket
 
   ecr_repository_arns = module.ecr.repository_arns
+
+  # 이미지 업로드와 Loki 로그 저장에 쓰는 버킷.
+  # 여기 없는 버킷에는 노드 Role 로 접근할 수 없다.
+  s3_bucket_arns = concat(
+    [module.s3.image_bucket_arn],
+    module.s3.loki_bucket_arns,
+  )
 }
 
 # ─────────────────────────────────────────────
@@ -154,4 +161,21 @@ module "ecr" {
   source = "../../modules/ecr"
 
   name_prefix = local.name_prefix
+}
+# ─────────────────────────────────────────────
+# S3
+#
+# 이미지 업로드 버킷은 콘솔에서 먼저 만들어진 것을 가져온다.
+# imports.tf 참조.
+# ─────────────────────────────────────────────
+
+module "s3" {
+  source = "../../modules/s3"
+
+  name_prefix = local.name_prefix
+
+  image_allowed_origins = [
+    "https://${var.domain_name}",
+    "https://www.${var.domain_name}",
+  ]
 }
