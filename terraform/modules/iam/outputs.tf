@@ -16,6 +16,11 @@ output "github_actions_role_arn" {
   value       = aws_iam_role.github_actions.arn
 }
 
+output "iac_plan_role_arn" {
+  description = "IaC 보안 PR 워크플로의 role-to-assume 에 지정한다 (plan 전용, 읽기 전용)."
+  value       = aws_iam_role.iac_plan.arn
+}
+
 output "github_oidc_provider_arn" {
   value = aws_iam_openid_connect_provider.github.arn
 }

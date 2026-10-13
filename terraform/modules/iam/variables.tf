@@ -37,6 +37,12 @@ variable "github_repos" {
   default     = ["service-backend", "service-frontend"]
 }
 
+variable "iac_plan_repo" {
+  description = "IaC 보안 PR plan Role(plan-ro)을 쓸 수 있는 레포. pull_request 이벤트만 허용한다."
+  type        = string
+  default     = "infrastructure"
+}
+
 variable "ecr_repository_arns" {
   description = <<-EOT
     GitHub Actions 가 push 할 수 있는 ECR 리포지토리 ARN 목록.
