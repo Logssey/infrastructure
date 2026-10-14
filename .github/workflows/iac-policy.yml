@@ -1,0 +1,51 @@
+# ─────────────────────────────────────────────
+# IaC 보안 gate 정책 테스트
+#
+# 정책(policy/)이나 Terraform 코드가 바뀌는 PR 마다
+#   1. 단위 테스트: 위험 시나리오를 막고 정상 변경은 통과시키는지
+#   2. 오탐 검사: 지금 레포 코드에서 FAIL·WARN 이 하나도 없는지
+# 를 확인한다. AWS 자격 증명은 쓰지 않는다.
+#
+# Action 은 커밋 SHA 로, Conftest 는 버전과 체크섬으로 고정한다 (IaC 보안 SR-3·SR-7).
+# ─────────────────────────────────────────────
+
+name: iac-policy
+
+on:
+  pull_request:
+    paths:
+      - "policy/**"
+      - "terraform/**"
+      - ".github/workflows/iac-policy.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: IaC gate policy test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Conftest (checksum verified)
+        env:
+          CONFTEST_VERSION: "0.71.1"
+          CONFTEST_SHA256: c3f6b2a753bd56e377a1e51a95ae3e057f926f2e9139f7d5b5dfbbaf810f7985
+        run: |
+          curl -sSfLo conftest.tar.gz \
+            "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          echo "${CONFTEST_SHA256}  conftest.tar.gz" | sha256sum -c -
+          tar xzf conftest.tar.gz conftest
+          sudo install -m 0755 conftest /usr/local/bin/conftest
+          conftest --version
+
+      - name: Unit tests
+        run: conftest verify --policy policy
+
+      - name: No false positives on current code
+        run: |
+          find terraform -name '*.tf' -not -path '*/.terraform/*' -print0 \
+            | xargs -0 conftest test --parser hcl2 --policy policy --fail-on-warn
