@@ -14,6 +14,15 @@ resource "aws_iam_openid_connect_provider" "k8s" {
   url            = local.issuer_url
   client_id_list = ["sts.amazonaws.com"]
 
+  # IAM 은 공급자를 만들 때 issuer_url 에 직접 접속해 인증서를 확인한다.
+  # 문서·CloudFront·DNS 가 먼저 준비되지 않으면 OpenIdIdpCommunicationError 로 실패한다.
+  depends_on = [
+    aws_route53_record.oidc,
+    aws_s3_bucket_policy.oidc,
+    aws_s3_object.openid_configuration,
+    aws_s3_object.jwks,
+  ]
+
   tags = {
     Name = "${var.name_prefix}-oidc-k8s"
   }
