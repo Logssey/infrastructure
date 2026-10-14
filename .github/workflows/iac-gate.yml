@@ -1,0 +1,61 @@
+# ─────────────────────────────────────────────
+# IaC 보안 ② plan 전 검사 (gate)
+#
+# 모든 PR 에서 policy/gate.sh 를 돌린다. 차단이 하나라도 있으면 실패한다.
+#   관문 0·1 변경 감지 → 2 정적 검사 → 3 init(lock 고정) → 2b 원격 모듈 재검사
+#
+# 필수 검사로 지정할 것이라 paths 필터를 두지 않는다.
+# (필터로 건너뛴 필수 검사는 Pending 으로 남아 머지가 막힌다)
+#
+# AWS 자격 증명은 쓰지 않는다. plan 은 별도 job 에서 plan-ro Role 로 한다 (IaC 보안 스프린트 2).
+# Action 은 커밋 SHA 로, 도구는 버전과 체크섬으로 고정한다 (IaC 보안 SR-3·SR-7).
+# ─────────────────────────────────────────────
+
+name: iac-gate
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: IaC gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # PR 머지 커밋과 그 부모(base)만 받는다. HEAD^1 과의 차이가 PR 의 변경이다.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Install tools (checksum verified)
+        env:
+          CONFTEST_VERSION: "0.71.1"
+          CONFTEST_SHA256: c3f6b2a753bd56e377a1e51a95ae3e057f926f2e9139f7d5b5dfbbaf810f7985
+          TERRAFORM_VERSION: "1.16.5"
+          TERRAFORM_SHA256: 2bc2fcfff033265c9e02ca0351f01794eb122f62a9b2a49a3294b9e49eaab5e4
+        run: |
+          curl -sSfLo conftest.tar.gz \
+            "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          echo "${CONFTEST_SHA256}  conftest.tar.gz" | sha256sum -c -
+          tar xzf conftest.tar.gz conftest
+          sudo install -m 0755 conftest /usr/local/bin/conftest
+
+          curl -sSfLo terraform.zip \
+            "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          echo "${TERRAFORM_SHA256}  terraform.zip" | sha256sum -c -
+          unzip -q terraform.zip terraform
+          sudo install -m 0755 terraform /usr/local/bin/terraform
+
+          rm -f conftest conftest.tar.gz terraform terraform.zip
+          conftest --version
+          terraform version
+
+      - name: Gate
+        env:
+          GATE_OUTPUT: github
+          TF_IN_AUTOMATION: "1"
+        run: GATE_BASE="$(git rev-parse HEAD^1)" policy/gate.sh
