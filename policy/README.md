@@ -43,7 +43,25 @@ GATE_BASE=origin/develop policy/gate.sh
 ```
 
 - 관문 0·1 은 `GATE_BASE` 가 있을 때만 돈다.
+- init 결과는 `.terraform` 이 아니라 `.terraform-gate` 에 둔다. backend 가 초기화된 `.terraform` 이 있으면 `-backend=false` 라도 자격 증명을 찾기 때문이다.
 - 원격 모듈을 추가하거나 버전을 바꾸면 "기준 해시 없음" 경고와 함께 줄이 출력된다. 모듈 내용을 검토한 뒤 그 줄을 `module-hashes.txt` 에 붙인다.
+
+## 로컬 plan (`make plan`)
+
+레포 루트에서 실행한다. 필요 도구: make, docker, aws CLI, jq, git, curl, unzip.
+
+```bash
+make plan            # gate → plan (ENV=prod)
+make gate            # gate 만, 자격 증명 없음
+```
+
+1. `make tools` 가 conftest·terraform 을 버전과 체크섬으로 고정해 `.tools/bin` 에 받는다.
+2. `gate.sh` 가 돌고, 차단이면 자격 증명을 받기 전에 멈춘다.
+3. 내 IAM 사용자로 plan-ro Role 을 assume 한다 (1시간, 세션 이름 = 사용자 이름).
+4. 이미지 digest 로 고정한 Terraform 컨테이너에서 `plan -lock=false` 를 돈다.
+    - 컨테이너에는 `terraform/` 만 읽기 전용으로 들어간다. 홈 디렉터리·`~/.aws`·장기 키는 들어가지 않는다.
+    - gate 가 검사한 `.terraform-gate` 의 모듈·프로바이더를 그대로 쓴다.
+    - 사람이 쓰는 `.terraform` 은 건드리지 않는다.
 
 ## 규칙을 바꿀 때
 
