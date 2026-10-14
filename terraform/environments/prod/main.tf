@@ -154,6 +154,28 @@ module "edge" {
 }
 
 # ─────────────────────────────────────────────
+# 쿠버네티스 서비스 계정 OIDC (IRSA)
+#
+# jwks.json 은 cp 노드에서 `kubectl get --raw /openid/v1/jwks` 로 받은 공개 키다.
+# 서명 키를 교체하면 이 파일을 다시 받는다.
+# ─────────────────────────────────────────────
+
+module "k8s_oidc" {
+  source = "../../modules/k8s-oidc"
+
+  name_prefix     = local.name_prefix
+  domain_name     = var.domain_name
+  zone_id         = module.dns.zone_id
+  certificate_arn = module.dns.cloudfront_certificate_arn
+  price_class     = var.cloudfront_price_class
+
+  jwks_json = file("${path.module}/k8s-oidc/jwks.json")
+
+  # 10/14 시험 완료(시험 파드가 이 Role 로 나옴). 시험 Role 은 지운다.
+  create_irsa_test_role = false
+}
+
+# ─────────────────────────────────────────────
 # CI/CD
 # ─────────────────────────────────────────────
 

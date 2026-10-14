@@ -178,3 +178,27 @@ output "iac_plan_role_arn" {
   description = "IaC 보안 PR plan Role ARN (infrastructure 레포 PR 워크플로용, 읽기 전용)"
   value       = module.iam.iac_plan_role_arn
 }
+
+# ─────────────────────────────────────────────
+# 쿠버네티스 서비스 계정 OIDC (IRSA)
+# ─────────────────────────────────────────────
+
+output "k8s_oidc_issuer_url" {
+  description = "kube-apiserver --service-account-issuer 첫 번째 값"
+  value       = module.k8s_oidc.issuer_url
+}
+
+output "k8s_oidc_jwks_uri" {
+  description = "kube-apiserver --service-account-jwks-uri 값"
+  value       = module.k8s_oidc.jwks_uri
+}
+
+output "k8s_oidc_provider_arn" {
+  description = "IRSA 역할 신뢰 정책의 Federated principal"
+  value       = module.k8s_oidc.oidc_provider_arn
+}
+
+output "irsa_test_role_arn" {
+  description = "IRSA 시험 파드의 AWS_ROLE_ARN"
+  value       = module.k8s_oidc.irsa_test_role_arn
+}
