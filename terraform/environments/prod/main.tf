@@ -170,6 +170,9 @@ module "k8s_oidc" {
   price_class     = var.cloudfront_price_class
 
   jwks_json = file("${path.module}/k8s-oidc/jwks.json")
+
+  # 10/14 시험 완료(시험 파드가 이 Role 로 나옴). 시험 Role 은 지운다.
+  create_irsa_test_role = false
 }
 
 # ─────────────────────────────────────────────
