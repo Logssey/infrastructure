@@ -173,3 +173,8 @@ output "loki_ruler_bucket_name" {
   description = "Loki ruler 버킷"
   value       = module.s3.loki_ruler_bucket_name
 }
+
+output "iac_plan_role_arn" {
+  description = "IaC 보안 PR plan Role ARN (infrastructure 레포 PR 워크플로용, 읽기 전용)"
+  value       = module.iam.iac_plan_role_arn
+}
