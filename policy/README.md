@@ -7,6 +7,8 @@ PR 의 `.tf` 를 `terraform init`·`plan` 전에 Conftest 로 검사한다.
 | --- | --- |
 | `gate.rego` | 규칙. `deny` = 차단, `warn` = 경고 |
 | `gate_test.rego` | 단위 테스트. 위험 시나리오 S1~S4·S6 와 경계 사례 |
+| `gate.sh` | plan 전 검사 전체 (관문 0·1·2·3·2b). CI 와 `make plan` 이 같이 쓴다 |
+| `module-hashes.txt` | 원격 모듈 내용 해시 기준 (관문 2b) |
 
 ## 실행
 
@@ -20,6 +22,28 @@ conftest verify --policy policy
 find terraform -name '*.tf' -not -path '*/.terraform/*' -print0 \
   | xargs -0 conftest test --parser hcl2 --policy policy
 ```
+
+## gate (plan 전 검사)
+
+`gate.sh` 는 AWS 자격 증명 없이 돌고, 차단이 하나라도 있으면 멈춘다. Terraform 은 1.16.5 로 고정한다.
+
+| 관문 | 내용 | 결과 |
+| --- | --- | --- |
+| 0·1 | 워크플로·lock 파일 변경 / backend·cloud 블록 변경 | 경고 / 차단 |
+| 2 | `.tf` 정적 검사, `.tf.json`·커밋된 `.terraform/` 거부 | 규칙대로 |
+| 3 | `terraform init -backend=false -lockfile=readonly` | 실패 시 차단 |
+| 2b | 내려받은 원격 모듈 재검사 + 내용 해시를 `module-hashes.txt` 와 비교 | 규칙대로 / 경고 |
+
+```bash
+# 로컬 (관문 0·1 생략)
+policy/gate.sh
+
+# 변경 감지까지 (CI 와 같음)
+GATE_BASE=origin/develop policy/gate.sh
+```
+
+- 관문 0·1 은 `GATE_BASE` 가 있을 때만 돈다.
+- 원격 모듈을 추가하거나 버전을 바꾸면 "기준 해시 없음" 경고와 함께 줄이 출력된다. 모듈 내용을 검토한 뒤 그 줄을 `module-hashes.txt` 에 붙인다.
 
 ## 규칙을 바꿀 때
 
