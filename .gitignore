@@ -1,5 +1,7 @@
 # Terraform
 .terraform/
+.terraform-gate/
+.tools/
 *.tfstate  
 *.tfstate.*
 crash.log
