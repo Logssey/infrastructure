@@ -7,7 +7,7 @@ terraform {
 
     # 환경별 상태 격리. dev 추가 시 "dev/terraform.tfstate"로 지정한다.
     # 버킷을 나눌 필요는 없다.
-    key = "prod/terraform.tfstate"
+    key = "prod/gate-test.tfstate"
 
     region  = "ap-northeast-1"
     encrypt = true
