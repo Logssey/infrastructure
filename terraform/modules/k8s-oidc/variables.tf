@@ -35,3 +35,9 @@ variable "price_class" {
   type        = string
   default     = "PriceClass_200"
 }
+
+variable "create_irsa_test_role" {
+  description = "IRSA 시험용 Role 생성 여부. 시험이 끝나면 false 로 바꿔 지운다."
+  type        = bool
+  default     = true
+}
