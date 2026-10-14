@@ -85,6 +85,24 @@ EC2 API 를 호출할 수 있다는 뜻이다.
 
 Pod 단위 권한 분리가 필요해지면 IRSA 구성 또는 Pod Identity 대안을 검토한다.
 
+## IRSA 자체 구성 (진행 중)
+
+위 한계를 풀기 위해 OIDC 발급자를 직접 구성한다. IaC 보안의 매일 작업(scanner-ro)이 첫 사용처이고,
+이후 ESO·Loki 처럼 노드 Role 을 함께 쓰는 Pod 도 각자 Role 로 옮길 수 있다.
+
+| 단계 | 내용 | 상태 |
+| --- | --- | --- |
+| 1. 공개 위치 | `https://k8s-oidc.<domain>` 에 OIDC 문서·JWKS 공개 (비공개 S3 + CloudFront OAC, `modules/k8s-oidc`) | Terraform |
+| 2. IAM OIDC 공급자 | 위 주소, audience `sts.amazonaws.com` | Terraform |
+| 3. 발급자 변경 | kube-apiserver `--service-account-issuer` 첫 번째 값을 새 주소로, 기존 `https://kubernetes.default.svc.cluster.local` 은 두 번째로 유지 (기존 토큰 계속 인정). `--service-account-jwks-uri` 도 새 주소 | Kubespray 변수·패치, 예정 |
+| 4. 시험 | `irsa-test` 네임스페이스 시험 파드가 projected 토큰으로 `logssey-prod-role-irsa-test` 를 받는지 확인 후 시험 Role 삭제 (`create_irsa_test_role = false`) | 예정 |
+
+**운영 주의**
+
+- 발급자 주소가 모든 토큰의 `iss` 이자 IAM OIDC 공급자 URL 이다. 바꾸면 apiserver 설정과 IRSA 신뢰 관계를 모두 다시 만들어야 하므로 고정 도메인을 쓴다.
+- 서비스 계정 서명 키(`sa.key`)를 교체하면 `environments/prod/k8s-oidc/jwks.json` 을 cp 노드에서 다시 받아(`kubectl get --raw /openid/v1/jwks`) apply 한다. 교체 중에는 이전 키와 새 키를 모두 넣는다.
+- IRSA Role 의 신뢰 정책은 `k8s-oidc.<domain>:sub` 로 `system:serviceaccount:<namespace>:<service-account>` 를 특정한다.
+
 ## T2 조치 계획
 
 ### 역할별 Role 분리
