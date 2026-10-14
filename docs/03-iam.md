@@ -85,23 +85,33 @@ EC2 API 를 호출할 수 있다는 뜻이다.
 
 Pod 단위 권한 분리가 필요해지면 IRSA 구성 또는 Pod Identity 대안을 검토한다.
 
-## IRSA 자체 구성 (진행 중)
+## IRSA 자체 구성
 
 위 한계를 풀기 위해 OIDC 발급자를 직접 구성한다. IaC 보안의 매일 작업(scanner-ro)이 첫 사용처이고,
 이후 ESO·Loki 처럼 노드 Role 을 함께 쓰는 Pod 도 각자 Role 로 옮길 수 있다.
 
 | 단계 | 내용 | 상태 |
 | --- | --- | --- |
-| 1. 공개 위치 | `https://k8s-oidc.<domain>` 에 OIDC 문서·JWKS 공개 (비공개 S3 + CloudFront OAC, `modules/k8s-oidc`) | Terraform |
-| 2. IAM OIDC 공급자 | 위 주소, audience `sts.amazonaws.com` | Terraform |
-| 3. 발급자 변경 | kube-apiserver `--service-account-issuer` 첫 번째 값을 새 주소로, 기존 `https://kubernetes.default.svc.cluster.local` 은 두 번째로 유지 (기존 토큰 계속 인정). `--service-account-jwks-uri` 도 새 주소 | Kubespray 변수·패치, 예정 |
-| 4. 시험 | `irsa-test` 네임스페이스 시험 파드가 projected 토큰으로 `logssey-prod-role-irsa-test` 를 받는지 확인 후 시험 Role 삭제 (`create_irsa_test_role = false`) | 예정 |
+| 1. 공개 위치 | `https://k8s-oidc.<domain>` 에 OIDC 문서·JWKS 공개 (비공개 S3 + CloudFront OAC, `modules/k8s-oidc`) | 완료 (10/14) |
+| 2. IAM OIDC 공급자 | 위 주소, audience `sts.amazonaws.com` | 완료 (10/14) |
+| 3. 발급자 변경 | kube-apiserver `--service-account-issuer` 첫 번째 값을 새 주소로, 기존 `https://kubernetes.default.svc.cluster.local` 은 두 번째로 유지 (기존 토큰 계속 인정). `--service-account-jwks-uri` 도 새 주소, `--api-audiences` 는 기존 값 고정 | 완료 (10/14, 아래 절차) |
+| 4. 시험 | `irsa-test` 네임스페이스 시험 파드가 projected 토큰으로 `logssey-prod-role-irsa-test` 를 받는지 확인 후 시험 Role 삭제 (`create_irsa_test_role = false`) | 완료 (10/14, 시험 파드가 `assumed-role/logssey-prod-role-irsa-test` 로 나옴) |
 
 **운영 주의**
 
 - 발급자 주소가 모든 토큰의 `iss` 이자 IAM OIDC 공급자 URL 이다. 바꾸면 apiserver 설정과 IRSA 신뢰 관계를 모두 다시 만들어야 하므로 고정 도메인을 쓴다.
 - 서비스 계정 서명 키(`sa.key`)를 교체하면 `environments/prod/k8s-oidc/jwks.json` 을 cp 노드에서 다시 받아(`kubectl get --raw /openid/v1/jwks`) apply 한다. 교체 중에는 이전 키와 새 키를 모두 넣는다.
 - IRSA Role 의 신뢰 정책은 `k8s-oidc.<domain>:sub` 로 `system:serviceaccount:<namespace>:<service-account>` 를 특정한다.
+- 파드는 projected 토큰(audience `sts.amazonaws.com`)을 마운트하고 `AWS_ROLE_ARN`·`AWS_WEB_IDENTITY_TOKEN_FILE` 을 넣는다. 노드 Role 로 떨어지지 않게 하려면 `AWS_EC2_METADATA_DISABLED=true` 도 넣는다.
+
+**발급자 변경 방법 (10/14 적용 기록)**
+
+- `upgrade-cluster.yml` 은 쓰지 않는다. kubeadm 1.35 의 `upgrade apply` 는 설정 파일의 ClusterConfiguration 을 무시하고 `kubeadm-config` ConfigMap 을 읽어서 extraArgs 가 반영되지 않았다 (패치만 적용, 정적 파드 해시 대기 시간 초과로 실패).
+- 두 단계로 manifest 를 직접 바꿨다. 노드 하나씩, 바꾸기 전 diff 확인.
+    1. 3대 모두 발급자 [기존, 새] + jwks-uri + api-audiences: 기존으로 서명하면서 새 주소도 인정
+    2. 3대 모두 [새, 기존]: 새 주소로 서명 시작. 1단계가 끝난 뒤라 어느 apiserver 도 새 토큰을 거부하지 않음
+- 마지막으로 `kubeadm-config` ConfigMap 의 apiServer.extraArgs 에 같은 값을 넣고, 기존 발급자는 `kubeadm_patches`(`/etc/kubernetes/patches`)가 두 번째로 덧붙인다. 이후 kubeadm 이 manifest 를 다시 만들어도 같은 결과가 된다.
+- Kubespray 인벤토리(`kubespray/group_vars/k8s_cluster/k8s-cluster.yml` IRSA 절)도 같은 값이라 새 클러스터 구축 시 그대로 적용된다.
 
 ## T2 조치 계획
 
