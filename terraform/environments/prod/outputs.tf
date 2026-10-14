@@ -1,3 +1,4 @@
+# gate 테스트: 정상 변경
 output "control_plane_private_ips" {
   description = "Kubespray 인벤토리 [kube_control_plane]"
   value       = module.compute.control_plane_private_ips
