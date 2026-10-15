@@ -63,6 +63,8 @@ make gate            # gate 만, 자격 증명 없음
     - gate 가 검사한 `.terraform-gate` 의 모듈·프로바이더를 그대로 쓴다.
     - 사람이 쓰는 `.terraform` 은 건드리지 않는다.
 
+plan-ro Role 을 쓸 수 있는 사람은 `terraform/environments/prod/main.tf` 의 `iac_plan_local_users` 로 정한다.
+
 ## 규칙을 바꿀 때
 
 - PR 로만 바꾼다. 이 폴더는 CODEOWNERS 로 security-team 리뷰 대상이다.

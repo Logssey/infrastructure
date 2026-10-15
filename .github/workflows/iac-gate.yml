@@ -24,6 +24,9 @@ jobs:
     name: IaC gate
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      # HashiCorp 버전 확인(checkpoint) 외부 호출을 끈다. 버전은 고정해서 쓴다.
+      CHECKPOINT_DISABLE: "1"
     steps:
       # PR 머지 커밋과 그 부모(base)만 받는다. HEAD^1 과의 차이가 PR 의 변경이다.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

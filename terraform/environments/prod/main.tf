@@ -38,6 +38,12 @@ module "iam" {
   security_mode  = var.security_mode
   tfstate_bucket = var.tfstate_bucket
 
+  # 로컬 make plan 에서 읽기 전용 plan-ro Role 을 쓸 IAM 사용자 (IaC 보안 ADR-12)
+  iac_plan_local_users = ["jongmin"]
+
+  # plan refresh 가 객체를 읽어야 하는 공개 버킷 (OIDC discovery 문서, CloudFront 로 공개 중)
+  iac_plan_public_bucket_arns = [module.k8s_oidc.bucket_arn]
+
   ecr_repository_arns = module.ecr.repository_arns
 
   # 이미지 업로드와 Loki 로그 저장에 쓰는 버킷.

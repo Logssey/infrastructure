@@ -36,7 +36,7 @@ DOCKER_RUN = docker run --rm \
 	--user $$(id -u):$$(id -g) \
 	--read-only --tmpfs /tmp \
 	--cap-drop ALL --security-opt no-new-privileges \
-	-e HOME=/tmp -e TF_DATA_DIR=/tmp/tfdata -e TF_IN_AUTOMATION=1 -e TF_INPUT=0 \
+	-e HOME=/tmp -e TF_DATA_DIR=/tmp/tfdata -e TF_IN_AUTOMATION=1 -e TF_INPUT=0 -e CHECKPOINT_DISABLE=1 \
 	-e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
 	-v "$(CURDIR)/terraform:/work/terraform:ro" \
 	-w /work/$(ROOT) \
