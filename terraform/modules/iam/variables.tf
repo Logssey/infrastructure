@@ -43,6 +43,11 @@ variable "iac_plan_repo" {
   default     = "infrastructure"
 }
 
+variable "iac_plan_local_users" {
+  description = "로컬 래퍼(make plan)로 plan-ro Role 을 assume 할 수 있는 IAM 사용자 이름 목록."
+  type        = list(string)
+}
+
 variable "ecr_repository_arns" {
   description = <<-EOT
     GitHub Actions 가 push 할 수 있는 ECR 리포지토리 ARN 목록.

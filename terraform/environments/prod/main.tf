@@ -38,6 +38,9 @@ module "iam" {
   security_mode  = var.security_mode
   tfstate_bucket = var.tfstate_bucket
 
+  # 로컬 make plan 에서 읽기 전용 plan-ro Role 을 쓸 IAM 사용자 (IaC 보안 ADR-12)
+  iac_plan_local_users = ["jongmin"]
+
   ecr_repository_arns = module.ecr.repository_arns
 
   # 이미지 업로드와 Loki 로그 저장에 쓰는 버킷.
