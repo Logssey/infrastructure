@@ -26,6 +26,9 @@ cd "$(git rev-parse --show-toplevel)"
 # -backend=false 라도 backend 를 읽으려고 자격 증명을 찾기 때문이다. make plan 은 이 디렉터리의 모듈로 plan 한다.
 export TF_DATA_DIR=.terraform-gate
 
+# HashiCorp 버전 확인(checkpoint) 외부 호출을 끈다. 버전은 고정해서 쓴다.
+export CHECKPOINT_DISABLE=1
+
 POLICY="$PWD/policy"
 HASHES="$POLICY/module-hashes.txt"
 OUTPUT="${GATE_OUTPUT:-stdout}"
