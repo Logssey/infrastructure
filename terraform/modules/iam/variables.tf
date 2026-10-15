@@ -48,6 +48,14 @@ variable "iac_plan_local_users" {
   type        = list(string)
 }
 
+variable "iac_plan_public_bucket_arns" {
+  description = <<-EOT
+    plan-ro Role 이 객체를 읽을 수 있는 버킷 ARN 목록.
+    Terraform 이 객체(aws_s3_object)를 관리하고, 내용이 이미 공개된 버킷만 넣는다.
+  EOT
+  type        = list(string)
+}
+
 variable "ecr_repository_arns" {
   description = <<-EOT
     GitHub Actions 가 push 할 수 있는 ECR 리포지토리 ARN 목록.

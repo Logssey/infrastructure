@@ -82,11 +82,15 @@ data "aws_iam_policy_document" "iac_plan_deny_data" {
   }
 
   # 버킷 객체 내용. plan 은 버킷 설정만 읽으므로 tfstate 객체를 뺀 모든 객체 읽기를 막는다.
+  # Terraform 이 관리하는 공개 객체(aws_s3_object)는 refresh 에 HeadObject(= s3:GetObject 권한)가 필요해 예외로 둔다.
   statement {
-    sid           = "DenyObjectReadExceptState"
-    effect        = "Deny"
-    actions       = ["s3:GetObject", "s3:GetObjectVersion"]
-    not_resources = ["arn:aws:s3:::${var.tfstate_bucket}/*"]
+    sid     = "DenyObjectReadExceptState"
+    effect  = "Deny"
+    actions = ["s3:GetObject", "s3:GetObjectVersion"]
+    not_resources = concat(
+      ["arn:aws:s3:::${var.tfstate_bucket}/*"],
+      [for arn in var.iac_plan_public_bucket_arns : "${arn}/*"],
+    )
   }
 }
 
