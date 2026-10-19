@@ -78,6 +78,8 @@ module "compute" {
   etcd_private_ips          = var.etcd_private_ips
   worker_private_ips        = var.worker_private_ips
   redis_private_ip          = var.redis_private_ip
+
+  imds_tokens = "required"
 }
 
 module "rds" {
