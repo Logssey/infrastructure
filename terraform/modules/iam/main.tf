@@ -61,22 +61,6 @@ resource "aws_iam_role_policy_attachment" "ebs_csi" {
 # IAM 평가에서 Deny 는 Allow 보다 우선하므로 AmazonS3FullAccess 가 부착되어 있어도 이 버킷에는 접근할 수 없다.
 # ─────────────────────────────────────────────
 
-resource "aws_iam_role_policy" "deny_tfstate" {
-  name = "${var.name_prefix}-deny-tfstate"
-  role = aws_iam_role.node.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Deny"
-      Action = "s3:*"
-      Resource = [
-        "arn:aws:s3:::${var.tfstate_bucket}",
-        "arn:aws:s3:::${var.tfstate_bucket}/*"
-      ]
-    }]
-  })
-}
 
 # ─────────────────────────────────────────────
 # Secrets Manager 읽기
