@@ -14,8 +14,10 @@
 #
 # 필요 도구: git, jq, conftest v0.71.1, terraform 1.16.5
 # 환경 변수:
-#   GATE_BASE    비교 기준 커밋 (PR 의 base SHA)
-#   GATE_OUTPUT  github 이면 GitHub 주석 형식으로 출력
+#   GATE_BASE      비교 기준 커밋 (PR 의 base SHA)
+#   GATE_OUTPUT    github 이면 GitHub 주석 형식으로 출력
+#   GATE_FINDINGS  있으면 발견 건을 이 파일에 JSON 한 줄씩 남김 ({"level":"block|warn","msg":"[규칙 ID] ..."}).
+#                  CI 가 PR 코멘트·검사 결과를 만들 때 쓴다.
 # ─────────────────────────────────────────────
 
 set -euo pipefail
@@ -35,11 +37,28 @@ OUTPUT="${GATE_OUTPUT:-stdout}"
 CONFTEST=(conftest test --parser hcl2 --policy "$POLICY" --output "$OUTPUT")
 [ "$OUTPUT" = github ] && CONFTEST+=(--github-hide-passed)
 
+# 규칙 ID 가 붙은 발견 건만 남긴다.
+record() {
+  [ -n "${GATE_FINDINGS:-}" ] && [[ $2 == "[gate."* ]] || return 0
+  jq -nc --arg level "$1" --arg msg "$2" '{level: $level, msg: $msg}' >>"$GATE_FINDINGS"
+}
+
+# .tf 파일 정적 검사. GATE_FINDINGS 가 있으면 같은 검사를 JSON 으로 한 번 더 돌려 발견 건을 남긴다.
+scan() {
+  if [ -n "${GATE_FINDINGS:-}" ]; then
+    { conftest test --parser hcl2 --policy "$POLICY" --output json "$@" || true; } |
+      jq -c '.[] | (.failures[]? | {level: "block", msg}), (.warnings[]? | {level: "warn", msg})' >>"$GATE_FINDINGS"
+  fi
+  "${CONFTEST[@]}" "$@"
+}
+
 warn() {
+  record warn "$1"
   if [ "$OUTPUT" = github ]; then echo "::warning::$1"; else echo "WARN - $1"; fi
 }
 
 block() {
+  record block "$1"
   if [ "$OUTPUT" = github ]; then echo "::error::$1"; else echo "FAIL - $1"; fi
   exit 1
 }
@@ -83,8 +102,8 @@ echo "== 관문 2: 정적 검사"
 unscanned=$(git ls-files | grep -E '\.tf\.json$|(^|/)\.terraform(-gate)?/' || true)
 [ -z "$unscanned" ] || block "[gate.unscanned_file] 검사하지 않는 Terraform 파일: $(echo $unscanned)"
 
-find terraform -name '*.tf' -not -path '*/.terraform/*' -not -path '*/.terraform-gate/*' -print0 |
-  xargs -0 "${CONFTEST[@]}"
+mapfile -d '' tf_files < <(find terraform -name '*.tf' -not -path '*/.terraform/*' -not -path '*/.terraform-gate/*' -print0)
+scan "${tf_files[@]}"
 
 # ── 관문 3·2b: root 마다 init 후 내려받은 모듈 검사 ──
 for root in terraform/environments/*/; do
@@ -103,7 +122,8 @@ for root in terraform/environments/*/; do
   while IFS=$'\t' read -r key source version dir; do
     [ -n "$key" ] || continue
 
-    find "$root/$dir" -maxdepth 1 -name '*.tf' -print0 | xargs -0 -r "${CONFTEST[@]}"
+    mapfile -d '' tf_files < <(find "$root/$dir" -maxdepth 1 -name '*.tf' -print0)
+    [ ${#tf_files[@]} -eq 0 ] || scan "${tf_files[@]}"
 
     [ -z "$(find "$root/$dir" -maxdepth 1 -name '*.tf.json')" ] ||
       block "[gate.unscanned_file] 원격 모듈에 .tf.json: module.$key"
