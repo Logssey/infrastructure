@@ -1,0 +1,94 @@
+# ─────────────────────────────────────────────
+# IaC 보안 PR 검사·코멘트 등록 (logssey-iac GitHub App)
+#
+# iac-gate 가 끝나면 기본 브랜치(main)의 이 파일·코드로 돈다 (workflow_run).
+# iac-gate 가 남긴 iac-result 아티팩트를 받아 PR 에 검사 "plan 전 검사" 와 코멘트 하나를 등록한다.
+#
+# App 키는 배포 브랜치를 main 으로 제한한 environment(iac-app)의 secret 이라 PR 코드는 읽을 수 없다.
+# 이 워크플로는 PR 코드를 checkout·실행하지 않고, 아티팩트는 policy/report.sh 가 형식을 검사한 데이터로만 쓴다.
+# Action 은 커밋 SHA 로 고정한다 (IaC 보안 SR-3·SR-7).
+# ─────────────────────────────────────────────
+
+name: iac-report
+
+on:
+  workflow_run:
+    workflows: [iac-gate]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  report:
+    name: Report to PR
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: iac-app
+    permissions:
+      actions: read # iac-gate 실행의 아티팩트를 받음
+      contents: read # 기본 브랜치의 policy/ 를 받음
+    steps:
+      # 기본 브랜치 코드다 (workflow_run 의 기본 ref). PR 코드가 아니다.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: policy
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: iac-result
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/in
+
+      - name: Build report
+        run: policy/report.sh "$RUNNER_TEMP/in/result.json" "$RUNNER_TEMP/out"
+
+      - name: App token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.IAC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.IAC_APP_PRIVATE_KEY }}
+          permission-checks: write
+          permission-pull-requests: write
+
+      # 결과의 SHA 가 이 실행의 SHA 와 같고, PR 의 지금 head 와도 같을 때만 등록한다.
+      # (늦게 끝난 이전 커밋의 실행이 새 결과를 덮어쓰지 않게)
+      - name: Post check and comment
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          BOT: ${{ steps.app.outputs.app-slug }}[bot]
+        run: |
+          in="$RUNNER_TEMP/in/result.json"
+          out="$RUNNER_TEMP/out"
+          pr=$(jq -r .pr "$in")
+          sha=$(jq -r .head_sha "$in")
+
+          [ "$sha" = "$RUN_SHA" ] || { echo "::error::결과의 SHA($sha)가 실행 SHA($RUN_SHA)와 다름"; exit 1; }
+          head=$(gh api "repos/$REPO/pulls/$pr" --jq .head.sha)
+          if [ "$head" != "$sha" ]; then
+            echo "::notice::PR #$pr 에 새 커밋($head)이 있어 이 결과($sha)는 등록하지 않음"
+            exit 0
+          fi
+
+          jq -n --arg sha "$sha" --arg url "$RUN_URL" \
+                --rawfile conclusion "$out/conclusion" --rawfile title "$out/title" --rawfile body "$out/body.md" \
+            '{name: "plan 전 검사", head_sha: $sha, status: "completed", details_url: $url,
+              conclusion: ($conclusion | rtrimstr("\n")),
+              output: {title: ($title | rtrimstr("\n")), summary: $body}}' |
+            gh api "repos/$REPO/check-runs" --input - --jq '"검사 등록: \(.html_url)"'
+
+          # 숨은 표식이 있는 App 코멘트를 찾아 고친다. 없으면 새로 단다.
+          id=$(gh api --paginate "repos/$REPO/issues/$pr/comments" \
+                 --jq ".[] | select(.user.login == \"$BOT\" and (.body | startswith(\"<!-- logssey-iac -->\"))) | .id" | head -n1)
+          body=$(jq -n --rawfile body "$out/body.md" '{body: $body}')
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" --input - --jq '"코멘트 고침: \(.html_url)"' <<<"$body"
+          else
+            gh api "repos/$REPO/issues/$pr/comments" --input - --jq '"코멘트 등록: \(.html_url)"' <<<"$body"
+          fi

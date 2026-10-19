@@ -1,0 +1,16 @@
+{
+  "_comment": "② gate 규칙의 강도·심각도·제목. security-solution-docs/iac-security/02-functional-design/rule-spec.md 와 같게 유지한다. PR 코멘트·검사 결과(policy/report.sh)가 쓴다.",
+  "gate.exec_data_source": { "enforcement": "차단", "severity": "CRITICAL", "title": "plan 중 실행되는 data 소스" },
+  "gate.provisioner": { "enforcement": "차단", "severity": "CRITICAL", "title": "local-exec·remote-exec provisioner" },
+  "gate.lambda_invocation": { "enforcement": "차단", "severity": "HIGH", "title": "plan 중 Lambda 호출" },
+  "gate.provider_not_allowed": { "enforcement": "차단", "severity": "HIGH", "title": "허용 목록 밖 프로바이더" },
+  "gate.provider_unpinned": { "enforcement": "경고", "severity": "MEDIUM", "title": "프로바이더 버전 미고정" },
+  "gate.module_unpinned": { "enforcement": "경고", "severity": "MEDIUM", "title": "모듈 버전 미고정" },
+  "gate.backend_changed": { "enforcement": "차단", "severity": "HIGH", "title": "backend 블록 변경" },
+  "gate.lock_changed": { "enforcement": "경고", "severity": "MEDIUM", "title": "lock 파일 변경 (보안 리뷰 필요)" },
+  "gate.workflow_changed": { "enforcement": "경고", "severity": "HIGH", "title": "워크플로 변경 (보안 리뷰 필요)" },
+  "gate.lock_mismatch": { "enforcement": "차단", "severity": "HIGH", "title": "프로바이더가 lock 파일과 다름" },
+  "gate.module_content_changed": { "enforcement": "경고", "severity": "HIGH", "title": "같은 버전인데 모듈 내용이 다름" },
+  "gate.unscanned_file": { "enforcement": "차단", "severity": "HIGH", "title": "검사하지 않는 Terraform 파일" },
+  "gate.plan_failed": { "enforcement": "차단", "severity": "없음", "title": "plan 실패 (fail-closed)" }
+}
