@@ -1,0 +1,18 @@
+# PR 리포트 테스트: PR 브랜치 워크플로가 iac-app environment 에 들어가 App 키를 읽으려 함.
+# environment 배포 브랜치가 main 으로 제한돼 있어 이 job 은 시작 전에 거부되어야 함.
+name: zz-key-test
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  steal:
+    runs-on: ubuntu-24.04
+    environment: iac-app
+    steps:
+      - env:
+          KEY: ${{ secrets.IAC_APP_PRIVATE_KEY }}
+        run: echo "키 길이 ${#KEY} (0 이 아니면 노출된 것)"
