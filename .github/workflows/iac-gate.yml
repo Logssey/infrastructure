@@ -4,6 +4,8 @@
 # 모든 PR 에서 policy/gate.sh 를 돌린다. 차단이 하나라도 있으면 실패한다.
 #   관문 0·1 변경 감지 → 2 정적 검사 → 3 init(lock 고정) → 2b 원격 모듈 재검사
 # gate 를 통과한 뒤에만 plan-ro Role 의 임시 키를 받아 terraform plan 을 돌린다.
+# 결과는 iac-result 아티팩트로만 남기고, PR 검사·코멘트는 iac-report 워크플로가 App 으로 등록한다.
+# (이 워크플로는 PR 코드로 돌므로 App 키를 두지 않는다)
 #
 # 필수 검사로 지정할 것이라 paths 필터를 두지 않는다.
 # (필터로 건너뛴 필수 검사는 Pending 으로 남아 머지가 막힌다)
@@ -61,8 +63,10 @@ jobs:
           terraform version
 
       - name: Gate
+        id: gate
         env:
           GATE_OUTPUT: github
+          GATE_FINDINGS: ${{ runner.temp }}/findings.jsonl
           TF_IN_AUTOMATION: "1"
         run: GATE_BASE="$(git rev-parse HEAD^1)" policy/gate.sh
 
@@ -84,6 +88,7 @@ jobs:
       # gate 가 검사한 .terraform-gate 의 모듈·프로바이더로 plan 한다 (make plan 과 같은 방식, 다시 받지 않음).
       # backend 초기화는 임시 데이터 디렉터리에서 한다. plan-ro 는 잠금을 잡을 수 없어 -lock=false 로 돈다.
       - name: Plan
+        id: plan
         if: github.event.pull_request.head.repo.full_name == github.repository
         timeout-minutes: 10
         working-directory: terraform/environments/prod
@@ -132,5 +137,46 @@ jobs:
         with:
           name: plan-prod
           path: ${{ runner.temp }}/plan.scrubbed.json
+          retention-days: 1
+          if-no-files-found: error
+
+      # iac-report 가 읽을 결과. gate·plan 이 실패해도 남긴다.
+      # 값은 PR 번호·SHA·단계 결과·발견 건(규칙 ID + 문구)·plan 수만 담는다. iac-report 는 이것을 데이터로만 다룬다.
+      - name: Result
+        if: always()
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GATE: ${{ steps.gate.outcome }}
+          PLAN: ${{ steps.plan.outcome }}
+          FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          mkdir "$RUNNER_TEMP/iac-result"
+          touch "$RUNNER_TEMP/findings.jsonl"
+          [ "$PLAN" != failure ] ||
+            jq -nc '{level: "block", msg: "[gate.plan_failed] terraform plan 실패"}' >>"$RUNNER_TEMP/findings.jsonl"
+          [ "$FORK" != true ] || PLAN=fork
+
+          counts=null
+          if [ -f "$RUNNER_TEMP/plan.scrubbed.json" ]; then
+            counts=$(jq -c '[.resource_changes[]? | .change.actions | select(. != ["no-op"] and . != ["read"])] as $a
+              | {add: [$a[] | select(index("create"))] | length,
+                 change: [$a[] | select(. == ["update"])] | length,
+                 destroy: [$a[] | select(index("delete"))] | length,
+                 outputs: [.output_changes // {} | .[] | select(.actions != ["no-op"])] | length}' "$RUNNER_TEMP/plan.scrubbed.json")
+          fi
+
+          jq -n --argjson pr "$PR_NUMBER" --arg sha "$HEAD_SHA" --arg gate "$GATE" --arg plan "$PLAN" \
+                --argjson counts "$counts" --slurpfile findings "$RUNNER_TEMP/findings.jsonl" \
+            '{version: 1, pr: $pr, head_sha: $sha, gate: $gate, plan: $plan, plan_counts: $counts, findings: $findings}' \
+            >"$RUNNER_TEMP/iac-result/result.json"
+          cat "$RUNNER_TEMP/iac-result/result.json"
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: iac-result
+          path: ${{ runner.temp }}/iac-result/result.json
           retention-days: 1
           if-no-files-found: error
