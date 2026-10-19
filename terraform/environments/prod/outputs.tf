@@ -1,3 +1,4 @@
+# analyzer fixture: no resource change
 output "control_plane_private_ips" {
   description = "Kubespray 인벤토리 [kube_control_plane]"
   value       = module.compute.control_plane_private_ips
