@@ -96,3 +96,35 @@ jobs:
           terraform plan -lock=false -out="$RUNNER_TEMP/tfplan" ||
             { echo "::error::[gate.plan_failed] terraform plan 실패"; exit 1; }
           terraform show -json "$RUNNER_TEMP/tfplan" >"$RUNNER_TEMP/plan.json"
+
+      # plan 원본(tfplan, plan.json)은 지우고, 민감값을 지운 JSON 과 요약만 남긴다 (IaC 보안 ADR-06).
+      - name: Plan summary
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          policy/scrub-plan.sh "$RUNNER_TEMP/plan.json" >"$RUNNER_TEMP/plan.scrubbed.json"
+          rm "$RUNNER_TEMP/tfplan" "$RUNNER_TEMP/plan.json"
+
+          jq -r '
+            [.resource_changes[]? | select(.change.actions != ["no-op"] and .change.actions != ["read"])] as $rc
+            | "### terraform plan (prod)",
+              "",
+              "| 추가 | 변경 | 삭제 | 출력 변경 |",
+              "| --- | --- | --- | --- |",
+              "| \([$rc[] | select(.change.actions | index("create"))] | length)"
+                + " | \([$rc[] | select(.change.actions == ["update"])] | length)"
+                + " | \([$rc[] | select(.change.actions | index("delete"))] | length)"
+                + " | \([.output_changes // {} | .[] | select(.actions != ["no-op"])] | length) |",
+              "",
+              ($rc[] | "- `\(.address)`: \(.change.actions | join(", "))"),
+              "",
+              "민감값 \([.. | select(. == "(sensitive)")] | length)곳을 지운 plan JSON 을 아티팩트로 올림 (1일 보관)"
+          ' "$RUNNER_TEMP/plan.scrubbed.json" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload scrubbed plan
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: plan-prod
+          path: ${{ runner.temp }}/plan.scrubbed.json
+          retention-days: 1
+          if-no-files-found: error
