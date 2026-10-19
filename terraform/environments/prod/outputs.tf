@@ -155,3 +155,50 @@ output "github_actions_role_arn" {
   description = "각 앱 레포의 Secret 에 AWS_ROLE_ARN 으로 등록한다."
   value       = module.iam.github_actions_role_arn
 }
+# ─────────────────────────────────────────────
+# S3
+# ─────────────────────────────────────────────
+
+output "image_bucket_name" {
+  description = "이미지 업로드 버킷. 백엔드 IMAGE_S3_BUCKET 에 넣는다"
+  value       = module.s3.image_bucket_name
+}
+
+output "loki_chunks_bucket_name" {
+  description = "Loki 청크 버킷. Loki values 의 bucketNames.chunks 에 넣는다"
+  value       = module.s3.loki_chunks_bucket_name
+}
+
+output "loki_ruler_bucket_name" {
+  description = "Loki ruler 버킷"
+  value       = module.s3.loki_ruler_bucket_name
+}
+
+output "iac_plan_role_arn" {
+  description = "IaC 보안 PR plan Role ARN (infrastructure 레포 PR 워크플로용, 읽기 전용)"
+  value       = module.iam.iac_plan_role_arn
+}
+
+# ─────────────────────────────────────────────
+# 쿠버네티스 서비스 계정 OIDC (IRSA)
+# ─────────────────────────────────────────────
+
+output "k8s_oidc_issuer_url" {
+  description = "kube-apiserver --service-account-issuer 첫 번째 값"
+  value       = module.k8s_oidc.issuer_url
+}
+
+output "k8s_oidc_jwks_uri" {
+  description = "kube-apiserver --service-account-jwks-uri 값"
+  value       = module.k8s_oidc.jwks_uri
+}
+
+output "k8s_oidc_provider_arn" {
+  description = "IRSA 역할 신뢰 정책의 Federated principal"
+  value       = module.k8s_oidc.oidc_provider_arn
+}
+
+output "irsa_test_role_arn" {
+  description = "IRSA 시험 파드의 AWS_ROLE_ARN"
+  value       = module.k8s_oidc.irsa_test_role_arn
+}

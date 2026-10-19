@@ -1,0 +1,489 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.16.3",
+  "variables": {
+    "db_password": {
+      "value": "FIXTURE-SECRET-var2"
+    },
+    "region": {
+      "value": "ap-northeast-1"
+    },
+    "rotate": {
+      "value": "true"
+    }
+  },
+  "planned_values": {
+    "outputs": {
+      "plain_out": {
+        "sensitive": false,
+        "type": "string",
+        "value": "ap-northeast-1"
+      },
+      "secret_out": {
+        "sensitive": true,
+        "type": "string",
+        "value": "FIXTURE-SECRET-var2"
+      }
+    },
+    "root_module": {
+      "resources": [
+        {
+          "address": "terraform_data.changing",
+          "mode": "managed",
+          "type": "terraform_data",
+          "name": "changing",
+          "provider_name": "terraform.io/builtin/terraform",
+          "schema_version": 0,
+          "values": {
+            "id": "67ad41fa-9fa9-9e4b-a440-3d69a61542a7",
+            "input": {
+              "name": "keep",
+              "token": "FIXTURE-SECRET-new"
+            },
+            "store": null,
+            "triggers_replace": null
+          },
+          "sensitive_values": {
+            "input": {
+              "token": true
+            },
+            "output": {}
+          }
+        },
+        {
+          "address": "terraform_data.partial",
+          "mode": "managed",
+          "type": "terraform_data",
+          "name": "partial",
+          "provider_name": "terraform.io/builtin/terraform",
+          "schema_version": 0,
+          "values": {
+            "id": "62e05c68-dd65-a191-fb66-2cc81ffe8dfa",
+            "input": {
+              "password": "FIXTURE-SECRET-var2",
+              "tags": [
+                "a",
+                "FIXTURE-SECRET-list"
+              ],
+              "username": "app"
+            },
+            "store": null,
+            "triggers_replace": null
+          },
+          "sensitive_values": {
+            "input": {
+              "password": true,
+              "tags": [
+                false,
+                true
+              ]
+            },
+            "output": {}
+          }
+        },
+        {
+          "address": "terraform_data.whole",
+          "mode": "managed",
+          "type": "terraform_data",
+          "name": "whole",
+          "provider_name": "terraform.io/builtin/terraform",
+          "schema_version": 0,
+          "values": {
+            "id": "6b9c6f39-f1bc-5dab-b491-005916e14668",
+            "input": "FIXTURE-SECRET-whole",
+            "output": "FIXTURE-SECRET-whole",
+            "store": null,
+            "triggers_replace": null
+          },
+          "sensitive_values": {
+            "input": true
+          }
+        }
+      ]
+    }
+  },
+  "resource_changes": [
+    {
+      "address": "terraform_data.changing",
+      "mode": "managed",
+      "type": "terraform_data",
+      "name": "changing",
+      "provider_name": "terraform.io/builtin/terraform",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "before": {
+          "id": "67ad41fa-9fa9-9e4b-a440-3d69a61542a7",
+          "input": {
+            "name": "keep",
+            "token": "FIXTURE-SECRET-old"
+          },
+          "output": {
+            "name": "keep",
+            "token": "FIXTURE-SECRET-old"
+          },
+          "store": null,
+          "triggers_replace": null
+        },
+        "after": {
+          "id": "67ad41fa-9fa9-9e4b-a440-3d69a61542a7",
+          "input": {
+            "name": "keep",
+            "token": "FIXTURE-SECRET-new"
+          },
+          "store": null,
+          "triggers_replace": null
+        },
+        "after_unknown": {
+          "input": {},
+          "output": true
+        },
+        "before_sensitive": {
+          "input": {
+            "token": true
+          },
+          "output": {}
+        },
+        "after_sensitive": {
+          "input": {
+            "token": true
+          },
+          "output": {}
+        }
+      }
+    },
+    {
+      "address": "terraform_data.partial",
+      "mode": "managed",
+      "type": "terraform_data",
+      "name": "partial",
+      "provider_name": "terraform.io/builtin/terraform",
+      "change": {
+        "actions": [
+          "update"
+        ],
+        "before": {
+          "id": "62e05c68-dd65-a191-fb66-2cc81ffe8dfa",
+          "input": {
+            "password": "FIXTURE-SECRET-var",
+            "tags": [
+              "a",
+              "FIXTURE-SECRET-list"
+            ],
+            "username": "app"
+          },
+          "output": {
+            "password": "FIXTURE-SECRET-var",
+            "tags": [
+              "a",
+              "FIXTURE-SECRET-list"
+            ],
+            "username": "app"
+          },
+          "store": null,
+          "triggers_replace": null
+        },
+        "after": {
+          "id": "62e05c68-dd65-a191-fb66-2cc81ffe8dfa",
+          "input": {
+            "password": "FIXTURE-SECRET-var2",
+            "tags": [
+              "a",
+              "FIXTURE-SECRET-list"
+            ],
+            "username": "app"
+          },
+          "store": null,
+          "triggers_replace": null
+        },
+        "after_unknown": {
+          "input": {
+            "tags": [
+              false,
+              false
+            ]
+          },
+          "output": true
+        },
+        "before_sensitive": {
+          "input": {
+            "password": true,
+            "tags": [
+              false,
+              true
+            ]
+          },
+          "output": {
+            "tags": [
+              false,
+              false
+            ]
+          }
+        },
+        "after_sensitive": {
+          "input": {
+            "password": true,
+            "tags": [
+              false,
+              true
+            ]
+          },
+          "output": {}
+        }
+      }
+    },
+    {
+      "address": "terraform_data.whole",
+      "mode": "managed",
+      "type": "terraform_data",
+      "name": "whole",
+      "provider_name": "terraform.io/builtin/terraform",
+      "change": {
+        "actions": [
+          "no-op"
+        ],
+        "before": {
+          "id": "6b9c6f39-f1bc-5dab-b491-005916e14668",
+          "input": "FIXTURE-SECRET-whole",
+          "output": "FIXTURE-SECRET-whole",
+          "store": null,
+          "triggers_replace": null
+        },
+        "after": {
+          "id": "6b9c6f39-f1bc-5dab-b491-005916e14668",
+          "input": "FIXTURE-SECRET-whole",
+          "output": "FIXTURE-SECRET-whole",
+          "store": null,
+          "triggers_replace": null
+        },
+        "after_unknown": {},
+        "before_sensitive": {
+          "input": true
+        },
+        "after_sensitive": {
+          "input": true
+        }
+      }
+    }
+  ],
+  "output_changes": {
+    "plain_out": {
+      "actions": [
+        "no-op"
+      ],
+      "before": "ap-northeast-1",
+      "after": "ap-northeast-1",
+      "after_unknown": false,
+      "before_sensitive": false,
+      "after_sensitive": false
+    },
+    "secret_out": {
+      "actions": [
+        "update"
+      ],
+      "before": "FIXTURE-SECRET-var",
+      "after": "FIXTURE-SECRET-var2",
+      "after_unknown": false,
+      "before_sensitive": true,
+      "after_sensitive": true
+    }
+  },
+  "prior_state": {
+    "format_version": "1.0",
+    "terraform_version": "1.16.3",
+    "values": {
+      "outputs": {
+        "plain_out": {
+          "sensitive": false,
+          "value": "ap-northeast-1",
+          "type": "string"
+        },
+        "secret_out": {
+          "sensitive": true,
+          "value": "FIXTURE-SECRET-var2",
+          "type": "string"
+        }
+      },
+      "root_module": {
+        "resources": [
+          {
+            "address": "terraform_data.changing",
+            "mode": "managed",
+            "type": "terraform_data",
+            "name": "changing",
+            "provider_name": "terraform.io/builtin/terraform",
+            "schema_version": 0,
+            "values": {
+              "id": "67ad41fa-9fa9-9e4b-a440-3d69a61542a7",
+              "input": {
+                "name": "keep",
+                "token": "FIXTURE-SECRET-old"
+              },
+              "output": {
+                "name": "keep",
+                "token": "FIXTURE-SECRET-old"
+              },
+              "store": null,
+              "triggers_replace": null
+            },
+            "sensitive_values": {
+              "input": {
+                "token": true
+              },
+              "output": {}
+            }
+          },
+          {
+            "address": "terraform_data.partial",
+            "mode": "managed",
+            "type": "terraform_data",
+            "name": "partial",
+            "provider_name": "terraform.io/builtin/terraform",
+            "schema_version": 0,
+            "values": {
+              "id": "62e05c68-dd65-a191-fb66-2cc81ffe8dfa",
+              "input": {
+                "password": "FIXTURE-SECRET-var",
+                "tags": [
+                  "a",
+                  "FIXTURE-SECRET-list"
+                ],
+                "username": "app"
+              },
+              "output": {
+                "password": "FIXTURE-SECRET-var",
+                "tags": [
+                  "a",
+                  "FIXTURE-SECRET-list"
+                ],
+                "username": "app"
+              },
+              "store": null,
+              "triggers_replace": null
+            },
+            "sensitive_values": {
+              "input": {
+                "password": true,
+                "tags": [
+                  false,
+                  true
+                ]
+              },
+              "output": {
+                "tags": [
+                  false,
+                  false
+                ]
+              }
+            }
+          },
+          {
+            "address": "terraform_data.whole",
+            "mode": "managed",
+            "type": "terraform_data",
+            "name": "whole",
+            "provider_name": "terraform.io/builtin/terraform",
+            "schema_version": 0,
+            "values": {
+              "id": "6b9c6f39-f1bc-5dab-b491-005916e14668",
+              "input": "FIXTURE-SECRET-whole",
+              "output": "FIXTURE-SECRET-whole",
+              "store": null,
+              "triggers_replace": null
+            },
+            "sensitive_values": {
+              "input": true
+            }
+          }
+        ]
+      }
+    }
+  },
+  "configuration": {
+    "provider_config": {
+      "terraform": {
+        "name": "terraform",
+        "full_name": "terraform.io/builtin/terraform"
+      }
+    },
+    "root_module": {
+      "outputs": {
+        "plain_out": {
+          "expression": {
+            "references": [
+              "var.region"
+            ]
+          }
+        },
+        "secret_out": {
+          "sensitive": true,
+          "expression": {
+            "references": [
+              "var.db_password"
+            ]
+          }
+        }
+      },
+      "resources": [
+        {
+          "address": "terraform_data.changing",
+          "mode": "managed",
+          "type": "terraform_data",
+          "name": "changing",
+          "provider_config_key": "terraform",
+          "expressions": {
+            "input": {
+              "references": [
+                "var.rotate"
+              ]
+            }
+          },
+          "schema_version": 0
+        },
+        {
+          "address": "terraform_data.partial",
+          "mode": "managed",
+          "type": "terraform_data",
+          "name": "partial",
+          "provider_config_key": "terraform",
+          "expressions": {
+            "input": {
+              "references": [
+                "var.db_password"
+              ]
+            }
+          },
+          "schema_version": 0
+        },
+        {
+          "address": "terraform_data.whole",
+          "mode": "managed",
+          "type": "terraform_data",
+          "name": "whole",
+          "provider_config_key": "terraform",
+          "expressions": {
+            "input": {}
+          },
+          "schema_version": 0
+        }
+      ],
+      "variables": {
+        "db_password": {
+          "default": "FIXTURE-SECRET-var",
+          "sensitive": true
+        },
+        "region": {
+          "default": "ap-northeast-1"
+        },
+        "rotate": {
+          "default": false
+        }
+      }
+    }
+  },
+  "timestamp": "2026-10-19T02:10:21Z",
+  "applyable": true,
+  "complete": true,
+  "errored": false
+}

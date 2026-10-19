@@ -294,6 +294,63 @@ resource "aws_vpc_security_group_ingress_rule" "redis_from_worker" {
 # egress 통제는 Pod 라벨을 인식하는 Cilium NetworkPolicy 계층에서 다룬다.
 # ─────────────────────────────────────────────
 
+# ─────────────────────────────────────────────
+# 관측성 — Prometheus 스크레이핑 (15~17)
+#
+# Prometheus 는 Worker 에서 돌면서 모든 노드의 메트릭을 긁는다.
+# 같은 노드는 SG 를 거치지 않으므로 나머지 경로만 열면 된다.
+#
+# etcd 노드는 Kubernetes 노드가 아니라 node-exporter 가 없다.
+# etcd 자체 메트릭(2381)은 클라이언트 인증서가 필요해 미수집 상태다.
+#
+# 막혀 있으면 스크레이핑이 timeout 으로 실패하는데,
+# Prometheus UI 의 Targets 에서만 드러나고 서비스에는 영향이 없다.
+#   Get "http://10.20.11.20:9100/metrics": context deadline exceeded
+# ─────────────────────────────────────────────
+
+# ── 15. Worker → Worker (node-exporter) ──
+resource "aws_vpc_security_group_ingress_rule" "worker_node_exporter_from_worker" {
+  security_group_id            = aws_security_group.worker.id
+  referenced_security_group_id = aws_security_group.worker.id
+  ip_protocol                  = "tcp"
+  from_port                    = 9100
+  to_port                      = 9100
+  description                  = "node-exporter between workers"
+}
+
+# ── 15-b. Worker → Control Plane (node-exporter) ──
+resource "aws_vpc_security_group_ingress_rule" "cp_node_exporter_from_worker" {
+  security_group_id            = aws_security_group.control_plane.id
+  referenced_security_group_id = aws_security_group.worker.id
+  ip_protocol                  = "tcp"
+  from_port                    = 9100
+  to_port                      = 9100
+  description                  = "node-exporter from worker"
+}
+
+# ── 16. Worker → Control Plane (kube-controller-manager) ──
+#
+# Kubespray 는 --bind-address=:: 로 설정하므로 노드 IP 로 접근할 수 있다.
+# 기본값이 127.0.0.1 인 배포판에서는 이 규칙만으로 부족하다.
+resource "aws_vpc_security_group_ingress_rule" "cp_controller_manager_metrics" {
+  security_group_id            = aws_security_group.control_plane.id
+  referenced_security_group_id = aws_security_group.worker.id
+  ip_protocol                  = "tcp"
+  from_port                    = 10257
+  to_port                      = 10257
+  description                  = "kube-controller-manager metrics from worker"
+}
+
+# ── 17. Worker → Control Plane (kube-scheduler) ──
+resource "aws_vpc_security_group_ingress_rule" "cp_scheduler_metrics" {
+  security_group_id            = aws_security_group.control_plane.id
+  referenced_security_group_id = aws_security_group.worker.id
+  ip_protocol                  = "tcp"
+  from_port                    = 10259
+  to_port                      = 10259
+  description                  = "kube-scheduler metrics from worker"
+}
+
 locals {
   all_sg_ids = {
     public_nlb    = aws_security_group.public_nlb.id

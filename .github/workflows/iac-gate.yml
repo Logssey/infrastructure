@@ -1,0 +1,182 @@
+# ─────────────────────────────────────────────
+# IaC 보안 ② plan 전 검사 (gate)
+#
+# 모든 PR 에서 policy/gate.sh 를 돌린다. 차단이 하나라도 있으면 실패한다.
+#   관문 0·1 변경 감지 → 2 정적 검사 → 3 init(lock 고정) → 2b 원격 모듈 재검사
+# gate 를 통과한 뒤에만 plan-ro Role 의 임시 키를 받아 terraform plan 을 돌린다.
+# 결과는 iac-result 아티팩트로만 남기고, PR 검사·코멘트는 iac-report 워크플로가 App 으로 등록한다.
+# (이 워크플로는 PR 코드로 돌므로 App 키를 두지 않는다)
+#
+# 필수 검사로 지정할 것이라 paths 필터를 두지 않는다.
+# (필터로 건너뛴 필수 검사는 Pending 으로 남아 머지가 막힌다)
+#
+# gate 는 AWS 자격 증명 없이 돈다. 자격 증명은 그 뒤 plan 단계에서만 받는다.
+# Action 은 커밋 SHA 로, 도구는 버전과 체크섬으로 고정한다 (IaC 보안 SR-3·SR-7).
+# ─────────────────────────────────────────────
+
+name: iac-gate
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  id-token: write # plan-ro Role 을 OIDC 로 assume
+
+jobs:
+  gate:
+    name: IaC gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # HashiCorp 버전 확인(checkpoint) 외부 호출을 끈다. 버전은 고정해서 쓴다.
+      CHECKPOINT_DISABLE: "1"
+    steps:
+      # PR 머지 커밋과 그 부모(base)만 받는다. HEAD^1 과의 차이가 PR 의 변경이다.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Install tools (checksum verified)
+        env:
+          CONFTEST_VERSION: "0.71.1"
+          CONFTEST_SHA256: c3f6b2a753bd56e377a1e51a95ae3e057f926f2e9139f7d5b5dfbbaf810f7985
+          TERRAFORM_VERSION: "1.16.5"
+          TERRAFORM_SHA256: 2bc2fcfff033265c9e02ca0351f01794eb122f62a9b2a49a3294b9e49eaab5e4
+        # 레포 루트에 terraform/ 디렉터리가 있어 바이너리와 이름이 겹치므로 임시 디렉터리에서 받는다.
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -sSfLo conftest.tar.gz \
+            "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          echo "${CONFTEST_SHA256}  conftest.tar.gz" | sha256sum -c -
+          tar xzf conftest.tar.gz conftest
+          sudo install -m 0755 conftest /usr/local/bin/conftest
+
+          curl -sSfLo terraform.zip \
+            "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          echo "${TERRAFORM_SHA256}  terraform.zip" | sha256sum -c -
+          unzip -q terraform.zip terraform
+          sudo install -m 0755 terraform /usr/local/bin/terraform
+
+          conftest --version
+          terraform version
+
+      - name: Gate
+        id: gate
+        env:
+          GATE_OUTPUT: github
+          GATE_FINDINGS: ${{ runner.temp }}/findings.jsonl
+          TF_IN_AUTOMATION: "1"
+        run: GATE_BASE="$(git rev-parse HEAD^1)" policy/gate.sh
+
+      # 포크 PR 은 OIDC 토큰을 받지 못하므로 plan 을 하지 않는다.
+      - name: Plan skipped (fork)
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::notice::포크 PR 이라 plan 안 함 (OIDC 토큰 없음). gate 결과만 유효"
+          printf '### terraform plan (prod)\n\nplan 안 함: 포크 PR 은 OIDC 토큰을 받지 못한다. gate 결과만 유효하다.\n' >>"$GITHUB_STEP_SUMMARY"
+
+      - name: AWS credentials (plan-ro)
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.IAC_PLAN_ROLE_ARN }}
+          aws-region: ap-northeast-1
+          role-duration-seconds: 900
+
+      # gate 가 검사한 .terraform-gate 의 모듈·프로바이더로 plan 한다 (make plan 과 같은 방식, 다시 받지 않음).
+      # backend 초기화는 임시 데이터 디렉터리에서 한다. plan-ro 는 잠금을 잡을 수 없어 -lock=false 로 돈다.
+      - name: Plan
+        id: plan
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        timeout-minutes: 10
+        working-directory: terraform/environments/prod
+        env:
+          TF_DATA_DIR: ${{ runner.temp }}/tfdata
+          TF_IN_AUTOMATION: "1"
+          TF_INPUT: "0"
+          # 로컬은 terraform.tfvars(git 제외)로 넣는 값. 로컬과 같아야 태그 변경 없이 plan 된다.
+          TF_VAR_owner: ${{ vars.IAC_PLAN_OWNER }}
+        run: |
+          : "${TF_VAR_owner:?레포 변수 IAC_PLAN_OWNER 가 없음}"
+          mkdir "$TF_DATA_DIR"
+          cp -a .terraform-gate/modules "$TF_DATA_DIR/"
+          ln -s "$PWD/.terraform-gate/providers" "$TF_DATA_DIR/providers"
+          terraform init -lockfile=readonly >/dev/null
+          terraform plan -lock=false -out="$RUNNER_TEMP/tfplan" ||
+            { echo "::error::[gate.plan_failed] terraform plan 실패"; exit 1; }
+          terraform show -json "$RUNNER_TEMP/tfplan" >"$RUNNER_TEMP/plan.json"
+
+      # plan 원본(tfplan, plan.json)은 지우고, 민감값을 지운 JSON 과 요약만 남긴다 (IaC 보안 ADR-06).
+      - name: Plan summary
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          policy/scrub-plan.sh "$RUNNER_TEMP/plan.json" >"$RUNNER_TEMP/plan.scrubbed.json"
+          rm "$RUNNER_TEMP/tfplan" "$RUNNER_TEMP/plan.json"
+
+          jq -r '
+            [.resource_changes[]? | select(.change.actions != ["no-op"] and .change.actions != ["read"])] as $rc
+            | "### terraform plan (prod)",
+              "",
+              "| 추가 | 변경 | 삭제 | 출력 변경 |",
+              "| --- | --- | --- | --- |",
+              "| \([$rc[] | select(.change.actions | index("create"))] | length)"
+                + " | \([$rc[] | select(.change.actions == ["update"])] | length)"
+                + " | \([$rc[] | select(.change.actions | index("delete"))] | length)"
+                + " | \([.output_changes // {} | .[] | select(.actions != ["no-op"])] | length) |",
+              "",
+              ($rc[] | "- `\(.address)`: \(.change.actions | join(", "))"),
+              "",
+              "민감값 \([.. | select(. == "(sensitive)")] | length)곳을 지운 plan JSON 을 아티팩트로 올림 (1일 보관)"
+          ' "$RUNNER_TEMP/plan.scrubbed.json" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload scrubbed plan
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: plan-prod
+          path: ${{ runner.temp }}/plan.scrubbed.json
+          retention-days: 1
+          if-no-files-found: error
+
+      # iac-report 가 읽을 결과. gate·plan 이 실패해도 남긴다.
+      # 값은 PR 번호·SHA·단계 결과·발견 건(규칙 ID + 문구)·plan 수만 담는다. iac-report 는 이것을 데이터로만 다룬다.
+      - name: Result
+        if: always()
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GATE: ${{ steps.gate.outcome }}
+          PLAN: ${{ steps.plan.outcome }}
+          FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          mkdir "$RUNNER_TEMP/iac-result"
+          touch "$RUNNER_TEMP/findings.jsonl"
+          [ "$PLAN" != failure ] ||
+            jq -nc '{level: "block", msg: "[gate.plan_failed] terraform plan 실패"}' >>"$RUNNER_TEMP/findings.jsonl"
+          [ "$FORK" != true ] || PLAN=fork
+
+          counts=null
+          if [ -f "$RUNNER_TEMP/plan.scrubbed.json" ]; then
+            counts=$(jq -c '[.resource_changes[]? | .change.actions | select(. != ["no-op"] and . != ["read"])] as $a
+              | {add: [$a[] | select(index("create"))] | length,
+                 change: [$a[] | select(. == ["update"])] | length,
+                 destroy: [$a[] | select(index("delete"))] | length,
+                 outputs: [.output_changes // {} | .[] | select(.actions != ["no-op"])] | length}' "$RUNNER_TEMP/plan.scrubbed.json")
+          fi
+
+          jq -n --argjson pr "$PR_NUMBER" --arg sha "$HEAD_SHA" --arg gate "$GATE" --arg plan "$PLAN" \
+                --argjson counts "$counts" --slurpfile findings "$RUNNER_TEMP/findings.jsonl" \
+            '{version: 1, pr: $pr, head_sha: $sha, gate: $gate, plan: $plan, plan_counts: $counts, findings: $findings}' \
+            >"$RUNNER_TEMP/iac-result/result.json"
+          cat "$RUNNER_TEMP/iac-result/result.json"
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: iac-result
+          path: ${{ runner.temp }}/iac-result/result.json
+          retention-days: 1
+          if-no-files-found: error

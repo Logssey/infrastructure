@@ -38,7 +38,20 @@ module "iam" {
   security_mode  = var.security_mode
   tfstate_bucket = var.tfstate_bucket
 
+  # 로컬 make plan 에서 읽기 전용 plan-ro Role 을 쓸 IAM 사용자 (IaC 보안 ADR-12)
+  iac_plan_local_users = ["jongmin"]
+
+  # plan refresh 가 객체를 읽어야 하는 공개 버킷 (OIDC discovery 문서, CloudFront 로 공개 중)
+  iac_plan_public_bucket_arns = [module.k8s_oidc.bucket_arn]
+
   ecr_repository_arns = module.ecr.repository_arns
+
+  # 이미지 업로드와 Loki 로그 저장에 쓰는 버킷.
+  # 여기 없는 버킷에는 노드 Role 로 접근할 수 없다.
+  s3_bucket_arns = concat(
+    [module.s3.image_bucket_arn],
+    module.s3.loki_bucket_arns,
+  )
 }
 
 # ─────────────────────────────────────────────
@@ -147,6 +160,28 @@ module "edge" {
 }
 
 # ─────────────────────────────────────────────
+# 쿠버네티스 서비스 계정 OIDC (IRSA)
+#
+# jwks.json 은 cp 노드에서 `kubectl get --raw /openid/v1/jwks` 로 받은 공개 키다.
+# 서명 키를 교체하면 이 파일을 다시 받는다.
+# ─────────────────────────────────────────────
+
+module "k8s_oidc" {
+  source = "../../modules/k8s-oidc"
+
+  name_prefix     = local.name_prefix
+  domain_name     = var.domain_name
+  zone_id         = module.dns.zone_id
+  certificate_arn = module.dns.cloudfront_certificate_arn
+  price_class     = var.cloudfront_price_class
+
+  jwks_json = file("${path.module}/k8s-oidc/jwks.json")
+
+  # 10/14 시험 완료(시험 파드가 이 Role 로 나옴). 시험 Role 은 지운다.
+  create_irsa_test_role = false
+}
+
+# ─────────────────────────────────────────────
 # CI/CD
 # ─────────────────────────────────────────────
 
@@ -154,4 +189,21 @@ module "ecr" {
   source = "../../modules/ecr"
 
   name_prefix = local.name_prefix
+}
+# ─────────────────────────────────────────────
+# S3
+#
+# 이미지 업로드 버킷은 콘솔에서 먼저 만들어진 것을 가져온다.
+# imports.tf 참조.
+# ─────────────────────────────────────────────
+
+module "s3" {
+  source = "../../modules/s3"
+
+  name_prefix = local.name_prefix
+
+  image_allowed_origins = [
+    "https://${var.domain_name}",
+    "https://www.${var.domain_name}",
+  ]
 }

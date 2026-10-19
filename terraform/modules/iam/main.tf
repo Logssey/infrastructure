@@ -134,3 +134,58 @@ resource "aws_iam_instance_profile" "node" {
     Name = "${var.name_prefix}-instance-profile-node"
   }
 }
+
+# ─────────────────────────────────────────────
+# S3 접근
+#
+# 두 용도가 있다.
+#
+#   이미지 업로드   백엔드가 Presigned URL 을 발급하고
+#                  검증·복사·삭제를 직접 수행한다
+#   Loki           로그 청크와 인덱스를 읽고 쓴다
+#
+# 버킷 ARN 을 명시해 다른 버킷에 닿지 않게 한다.
+# 특히 tfstate 버킷은 deny 정책으로 따로 막혀 있으나,
+# 허용 범위 자체를 좁히는 것이 우선이다.
+# ─────────────────────────────────────────────
+
+data "aws_iam_policy_document" "s3_access" {
+  statement {
+    sid    = "BucketLevel"
+    effect = "Allow"
+    actions = [
+      "s3:ListBucket",
+      "s3:GetBucketLocation",
+    ]
+    resources = var.s3_bucket_arns
+  }
+
+  statement {
+    sid    = "ObjectLevel"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject",
+    ]
+    resources = [for arn in var.s3_bucket_arns : "${arn}/*"]
+  }
+
+  # 멀티파트 업로드를 중단하거나 정리할 때 필요하다.
+  # Loki 는 큰 청크를 쓸 때 멀티파트를 사용한다.
+  statement {
+    sid    = "MultipartUpload"
+    effect = "Allow"
+    actions = [
+      "s3:AbortMultipartUpload",
+      "s3:ListMultipartUploadParts",
+    ]
+    resources = [for arn in var.s3_bucket_arns : "${arn}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "s3_access" {
+  name   = "${var.name_prefix}-s3-access"
+  role   = aws_iam_role.node.id
+  policy = data.aws_iam_policy_document.s3_access.json
+}
