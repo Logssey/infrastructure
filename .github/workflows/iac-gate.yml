@@ -3,11 +3,12 @@
 #
 # 모든 PR 에서 policy/gate.sh 를 돌린다. 차단이 하나라도 있으면 실패한다.
 #   관문 0·1 변경 감지 → 2 정적 검사 → 3 init(lock 고정) → 2b 원격 모듈 재검사
+# gate 를 통과한 뒤에만 plan-ro Role 의 임시 키를 받아 terraform plan 을 돌린다.
 #
 # 필수 검사로 지정할 것이라 paths 필터를 두지 않는다.
 # (필터로 건너뛴 필수 검사는 Pending 으로 남아 머지가 막힌다)
 #
-# AWS 자격 증명은 쓰지 않는다. plan 은 별도 job 에서 plan-ro Role 로 한다 (IaC 보안 스프린트 2).
+# gate 는 AWS 자격 증명 없이 돈다. 자격 증명은 그 뒤 plan 단계에서만 받는다.
 # Action 은 커밋 SHA 로, 도구는 버전과 체크섬으로 고정한다 (IaC 보안 SR-3·SR-7).
 # ─────────────────────────────────────────────
 
@@ -18,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write # plan-ro Role 을 OIDC 로 assume
 
 jobs:
   gate:
@@ -63,3 +65,72 @@ jobs:
           GATE_OUTPUT: github
           TF_IN_AUTOMATION: "1"
         run: GATE_BASE="$(git rev-parse HEAD^1)" policy/gate.sh
+
+      # 포크 PR 은 OIDC 토큰을 받지 못하므로 plan 을 하지 않는다.
+      - name: Plan skipped (fork)
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::notice::포크 PR 이라 plan 안 함 (OIDC 토큰 없음). gate 결과만 유효"
+          printf '### terraform plan (prod)\n\nplan 안 함: 포크 PR 은 OIDC 토큰을 받지 못한다. gate 결과만 유효하다.\n' >>"$GITHUB_STEP_SUMMARY"
+
+      - name: AWS credentials (plan-ro)
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.IAC_PLAN_ROLE_ARN }}
+          aws-region: ap-northeast-1
+          role-duration-seconds: 900
+
+      # gate 가 검사한 .terraform-gate 의 모듈·프로바이더로 plan 한다 (make plan 과 같은 방식, 다시 받지 않음).
+      # backend 초기화는 임시 데이터 디렉터리에서 한다. plan-ro 는 잠금을 잡을 수 없어 -lock=false 로 돈다.
+      - name: Plan
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        timeout-minutes: 10
+        working-directory: terraform/environments/prod
+        env:
+          TF_DATA_DIR: ${{ runner.temp }}/tfdata
+          TF_IN_AUTOMATION: "1"
+          TF_INPUT: "0"
+          # 로컬은 terraform.tfvars(git 제외)로 넣는 값. 로컬과 같아야 태그 변경 없이 plan 된다.
+          TF_VAR_owner: ${{ vars.IAC_PLAN_OWNER }}
+        run: |
+          : "${TF_VAR_owner:?레포 변수 IAC_PLAN_OWNER 가 없음}"
+          mkdir "$TF_DATA_DIR"
+          cp -a .terraform-gate/modules "$TF_DATA_DIR/"
+          ln -s "$PWD/.terraform-gate/providers" "$TF_DATA_DIR/providers"
+          terraform init -lockfile=readonly >/dev/null
+          terraform plan -lock=false -out="$RUNNER_TEMP/tfplan" ||
+            { echo "::error::[gate.plan_failed] terraform plan 실패"; exit 1; }
+          terraform show -json "$RUNNER_TEMP/tfplan" >"$RUNNER_TEMP/plan.json"
+
+      # plan 원본(tfplan, plan.json)은 지우고, 민감값을 지운 JSON 과 요약만 남긴다 (IaC 보안 ADR-06).
+      - name: Plan summary
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          policy/scrub-plan.sh "$RUNNER_TEMP/plan.json" >"$RUNNER_TEMP/plan.scrubbed.json"
+          rm "$RUNNER_TEMP/tfplan" "$RUNNER_TEMP/plan.json"
+
+          jq -r '
+            [.resource_changes[]? | select(.change.actions != ["no-op"] and .change.actions != ["read"])] as $rc
+            | "### terraform plan (prod)",
+              "",
+              "| 추가 | 변경 | 삭제 | 출력 변경 |",
+              "| --- | --- | --- | --- |",
+              "| \([$rc[] | select(.change.actions | index("create"))] | length)"
+                + " | \([$rc[] | select(.change.actions == ["update"])] | length)"
+                + " | \([$rc[] | select(.change.actions | index("delete"))] | length)"
+                + " | \([.output_changes // {} | .[] | select(.actions != ["no-op"])] | length) |",
+              "",
+              ($rc[] | "- `\(.address)`: \(.change.actions | join(", "))"),
+              "",
+              "민감값 \([.. | select(. == "(sensitive)")] | length)곳을 지운 plan JSON 을 아티팩트로 올림 (1일 보관)"
+          ' "$RUNNER_TEMP/plan.scrubbed.json" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload scrubbed plan
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: plan-prod
+          path: ${{ runner.temp }}/plan.scrubbed.json
+          retention-days: 1
+          if-no-files-found: error
