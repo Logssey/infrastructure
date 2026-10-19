@@ -67,6 +67,12 @@ jobs:
         run: GATE_BASE="$(git rev-parse HEAD^1)" policy/gate.sh
 
       # 포크 PR 은 OIDC 토큰을 받지 못하므로 plan 을 하지 않는다.
+      - name: Plan skipped (fork)
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::notice::포크 PR 이라 plan 안 함 (OIDC 토큰 없음). gate 결과만 유효"
+          printf '### terraform plan (prod)\n\nplan 안 함: 포크 PR 은 OIDC 토큰을 받지 못한다. gate 결과만 유효하다.\n' >>"$GITHUB_STEP_SUMMARY"
+
       - name: AWS credentials (plan-ro)
         if: github.event.pull_request.head.repo.full_name == github.repository
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
