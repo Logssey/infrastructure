@@ -85,7 +85,10 @@ jobs:
           TF_DATA_DIR: ${{ runner.temp }}/tfdata
           TF_IN_AUTOMATION: "1"
           TF_INPUT: "0"
+          # 로컬은 terraform.tfvars(git 제외)로 넣는 값. 로컬과 같아야 태그 변경 없이 plan 된다.
+          TF_VAR_owner: ${{ vars.IAC_PLAN_OWNER }}
         run: |
+          : "${TF_VAR_owner:?레포 변수 IAC_PLAN_OWNER 가 없음}"
           mkdir "$TF_DATA_DIR"
           cp -a .terraform-gate/modules "$TF_DATA_DIR/"
           ln -s "$PWD/.terraform-gate/providers" "$TF_DATA_DIR/providers"
