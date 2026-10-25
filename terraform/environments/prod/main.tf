@@ -207,3 +207,15 @@ module "s3" {
     "https://www.${var.domain_name}",
   ]
 }
+
+# ─────────────────────────────────────────────
+# Microsoft Defender for Cloud CSPM (시험용, 2026-10-25 시작 · 30일)
+#
+# 읽기 전용 IAM Role 만 만든다. 삭제 순서는 modules/defender/main.tf 머리말 참조.
+# ─────────────────────────────────────────────
+
+module "defender" {
+  source = "../../modules/defender"
+
+  azure_tenant_id = "5ae7c905-9603-4876-89e8-6c6d380af242"
+}
