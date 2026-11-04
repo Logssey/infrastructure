@@ -32,7 +32,7 @@ find terraform -name '*.tf' -not -path '*/.terraform/*' -print0 \
 | 0·1 | 워크플로·lock 파일 변경 / backend·cloud 블록 변경 | 경고 / 차단 |
 | 2 | `.tf` 정적 검사, `.tf.json`·커밋된 `.terraform/` 거부 | 규칙대로 |
 | 3 | `terraform init -backend=false -lockfile=readonly` | 실패 시 차단 |
-| 2b | 내려받은 원격 모듈 재검사 + 내용 해시를 `module-hashes.txt` 와 비교 | 규칙대로 / 경고 |
+| 2b | 내려받은 원격 모듈 재검사 + 내용 해시를 `module-hashes.txt` 와 비교 | 규칙대로 / 해시 다르면 차단 |
 
 ```bash
 # 로컬 (관문 0·1 생략)
