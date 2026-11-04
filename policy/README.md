@@ -68,5 +68,6 @@ plan-ro Role 을 쓸 수 있는 사람은 `terraform/environments/prod/main.tf` 
 ## 규칙을 바꿀 때
 
 - PR 로만 바꾼다. 이 폴더는 CODEOWNERS 로 security-team 리뷰 대상이다.
+- `policy/`·`.github/` 를 바꾼 PR 은 "plan 전 검사" 가 `gate.check_code_changed` 로 차단된다. PR 이 바꾼 검사 코드로 만든 결과라 믿지 않기 때문이다. 보안 리뷰 후 ruleset 우회 권한이 있는 관리자가 병합한다.
 - 바꾼 규칙에는 차단·통과 테스트를 함께 추가한다.
 - 실제 코드 검사에서 FAIL·WARN 이 없어야 한다 (오탐 0).

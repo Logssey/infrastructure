@@ -8,8 +8,12 @@
 #   - 형식이 틀린 결과는 받지 않는다 (종료 코드 1)
 #   - rules.json 에 없는 규칙 ID 는 차단으로 본다 (fail-closed)
 #   - 발견 건 문구는 허용 문자·길이 안일 때만 그대로 쓰고, 아니면 표시하지 않는다
+#   - PR 이 검사 코드(.github/, policy/)를 바꿨으면 차단한다. 그 PR 의 result.json 은 바뀐 검사 코드로
+#     만든 것이라 믿을 수 없기 때문이다 (gate.check_code_changed). 변경 파일 목록은 iac-report 가
+#     GitHub API 로 받아 넘긴다 (PR 코드가 만든 데이터가 아님).
 #
-# 사용법: policy/report.sh result.json 출력디렉터리
+# 사용법: policy/report.sh result.json 출력디렉터리 [변경파일목록]
+#   변경파일목록: 한 줄에 경로 하나. 이름이 바뀐 파일은 예전 경로도 넣는다.
 #   출력: conclusion (success|neutral|failure), title, body.md (코멘트 본문, 숨은 표식 포함)
 # ─────────────────────────────────────────────
 
@@ -17,6 +21,7 @@ set -euo pipefail
 
 result=$1
 out=$2
+changed=${3:-/dev/null}
 rules="$(dirname "$0")/rules.json"
 
 jq -e '
@@ -32,8 +37,14 @@ jq -e '
 
 mkdir -p "$out"
 
-jq -r --slurpfile rules "$rules" '
-  . as $res
+jq -r --slurpfile rules "$rules" --rawfile changed "$changed" '
+  ([$changed | split("\n")[] | select(test("^(\\.github|policy)/"))] | unique) as $gate_code
+  | (if ($gate_code | length) > 0 then
+       .findings = [{level: "block",
+                     msg: "[gate.check_code_changed] 검사 코드가 바뀐 PR, 보안 리뷰 후 관리자 병합: \($gate_code | .[0:5] | join(" "))\(if ($gate_code | length) > 5 then " 외 \(($gate_code | length) - 5)개" else "" end)"}]
+                   + .findings
+     else . end)
+  | . as $res
   | $rules[0] as $r
   | ["CRITICAL", "HIGH", "MEDIUM", "LOW", "없음"] as $sev
 

@@ -6,6 +6,8 @@
 #
 # App 키는 배포 브랜치를 main 으로 제한한 environment(iac-app)의 secret 이라 PR 코드는 읽을 수 없다.
 # 이 워크플로는 PR 코드를 checkout·실행하지 않고, 아티팩트는 policy/report.sh 가 형식을 검사한 데이터로만 쓴다.
+# PR 이 검사 코드(.github/, policy/)를 바꿨으면 그 PR 의 결과는 믿지 않고 차단으로 등록한다.
+# 이런 PR 은 security-team 리뷰 후 ruleset 우회 권한이 있는 관리자가 병합한다.
 # Action 은 커밋 SHA 로 고정한다 (IaC 보안 SR-3·SR-7).
 # ─────────────────────────────────────────────
 
@@ -75,6 +77,12 @@ jobs:
             echo "::notice::PR #$pr 에 새 커밋($head)이 있어 이 결과($sha)는 등록하지 않음"
             exit 0
           fi
+
+          # PR 이 검사 코드(.github/, policy/)를 바꿨으면 차단한다 (gate.check_code_changed).
+          # 변경 파일 목록은 아티팩트가 아니라 API 에서 받는다. 이름이 바뀐 파일은 예전 경로도 본다.
+          gh api --paginate "repos/$REPO/pulls/$pr/files" --jq '.[] | .filename, (.previous_filename // empty)' \
+            >"$RUNNER_TEMP/changed.txt"
+          policy/report.sh "$in" "$out" "$RUNNER_TEMP/changed.txt"
 
           jq -n --arg sha "$sha" --arg url "$RUN_URL" \
                 --rawfile conclusion "$out/conclusion" --rawfile title "$out/title" --rawfile body "$out/body.md" \
