@@ -136,7 +136,7 @@ for root in terraform/environments/*/; do
     if [ -z "$expected" ]; then
       warn "기준 해시 없음 (새 모듈·버전 변경). 내용을 검토한 뒤 policy/module-hashes.txt 에 추가: $id $hash"
     elif [ "$expected" != "$hash" ]; then
-      warn "[gate.module_content_changed] 같은 버전인데 모듈 내용이 다름: $id (기준 $expected, 현재 $hash)"
+      block "[gate.module_content_changed] 같은 버전인데 모듈 내용이 다름, plan 중단: $id (기준 $expected, 현재 $hash)"
     fi
   done < <(jq -r --arg d "$TF_DATA_DIR/modules/" '.Modules[] | select(.Dir | startswith($d))
                   | [.Key, .Source, (.Version // "-"), .Dir] | @tsv' "$modules")

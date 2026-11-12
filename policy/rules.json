@@ -10,7 +10,8 @@
   "gate.lock_changed": { "enforcement": "경고", "severity": "MEDIUM", "title": "lock 파일 변경 (보안 리뷰 필요)" },
   "gate.workflow_changed": { "enforcement": "경고", "severity": "HIGH", "title": "워크플로 변경 (보안 리뷰 필요)" },
   "gate.lock_mismatch": { "enforcement": "차단", "severity": "HIGH", "title": "프로바이더가 lock 파일과 다름" },
-  "gate.module_content_changed": { "enforcement": "경고", "severity": "HIGH", "title": "같은 버전인데 모듈 내용이 다름" },
+  "gate.module_content_changed": { "enforcement": "차단", "severity": "HIGH", "title": "같은 버전인데 모듈 내용이 다름" },
+  "gate.check_code_changed": { "enforcement": "차단", "severity": "HIGH", "title": "검사 코드 변경 (PR 자신의 검사 결과를 믿지 않음)" },
   "gate.unscanned_file": { "enforcement": "차단", "severity": "HIGH", "title": "검사하지 않는 Terraform 파일" },
   "gate.plan_failed": { "enforcement": "차단", "severity": "없음", "title": "plan 실패 (fail-closed)" }
 }
