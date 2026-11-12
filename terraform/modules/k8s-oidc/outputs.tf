@@ -25,3 +25,8 @@ output "irsa_test_role_arn" {
   description = "IRSA 시험 파드의 AWS_ROLE_ARN"
   value       = var.create_irsa_test_role ? aws_iam_role.irsa_test[0].arn : null
 }
+
+output "scanner_role_arn" {
+  description = "Cartography CronJob(iac/cartography)의 AWS_ROLE_ARN"
+  value       = aws_iam_role.scanner.arn
+}

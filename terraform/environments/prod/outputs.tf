@@ -202,3 +202,8 @@ output "irsa_test_role_arn" {
   description = "IRSA 시험 파드의 AWS_ROLE_ARN"
   value       = module.k8s_oidc.irsa_test_role_arn
 }
+
+output "iac_scanner_role_arn" {
+  description = "IaC 보안 Cartography CronJob(iac/cartography)의 AWS_ROLE_ARN"
+  value       = module.k8s_oidc.scanner_role_arn
+}
