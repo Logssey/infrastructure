@@ -1,0 +1,16 @@
+#!/bin/bash
+# 첫 부팅에만 돈다. Docker, compose, ECR 자격 증명 도우미를 깐다. 비밀값은 여기에 넣지 않는다.
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install -y docker.io docker-compose-v2 amazon-ecr-credential-helper
+
+# 대시보드 ECR 만 인스턴스 역할로 로그인한다. Docker Hub(postgres)는 익명으로 받는다.
+install -d -m 0700 /root/.docker
+cat > /root/.docker/config.json <<'JSON'
+{"credHelpers": {"${ecr_registry}": "ecr-login"}}
+JSON
+
+systemctl enable --now docker
+install -d -m 0755 /opt/logssey
