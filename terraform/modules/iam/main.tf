@@ -55,30 +55,6 @@ resource "aws_iam_role_policy_attachment" "ebs_csi" {
 }
 
 # ─────────────────────────────────────────────
-# 상태 파일 버킷 보호 — 모드 무관, 항상 적용
-#
-# 상태 파일에는 RDS·Redis 비밀번호가 평문으로 저장되므로 의도적 취약 설정의 범위에서 제외한다.
-# IAM 평가에서 Deny 는 Allow 보다 우선하므로 AmazonS3FullAccess 가 부착되어 있어도 이 버킷에는 접근할 수 없다.
-# ─────────────────────────────────────────────
-
-resource "aws_iam_role_policy" "deny_tfstate" {
-  name = "${var.name_prefix}-deny-tfstate"
-  role = aws_iam_role.node.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Deny"
-      Action = "s3:*"
-      Resource = [
-        "arn:aws:s3:::${var.tfstate_bucket}",
-        "arn:aws:s3:::${var.tfstate_bucket}/*"
-      ]
-    }]
-  })
-}
-
-# ─────────────────────────────────────────────
 # Secrets Manager 읽기
 #
 # External Secrets Operator 가 AWS Secrets Manager 의 값을
