@@ -15,3 +15,7 @@ output "data_volume_id" {
 output "ecr_repository_urls" {
   value = { for name, repo in aws_ecr_repository.this : name => repo.repository_url }
 }
+
+output "dashboard_url" {
+  value = "https://${local.dashboard_fqdn}"
+}
