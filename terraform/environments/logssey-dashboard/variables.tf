@@ -55,3 +55,27 @@ variable "snapshot_retain_count" {
   type        = number
   default     = 7
 }
+
+variable "service_domain" {
+  description = "대시보드 주소를 둘 Route 53 공개 존. 기본값은 Re:Used 도메인"
+  type        = string
+  default     = "re-used.store"
+}
+
+variable "dashboard_host" {
+  description = "대시보드 주소의 앞부분. 주소는 <dashboard_host>.<service_domain>"
+  type        = string
+  default     = "logssey"
+}
+
+variable "public_subnet_names" {
+  description = "ALB 를 둘 공개 서브넷의 Name 태그 (AZ 2개 이상)"
+  type        = list(string)
+  default     = ["logssey-prod-subnet-public-a", "logssey-prod-subnet-public-c", "logssey-prod-subnet-public-d"]
+}
+
+variable "frontend_port" {
+  description = "EC2 에서 frontend(nginx) 가 받는 포트. ALB 와 SSM 포트 포워딩만 닿는다"
+  type        = number
+  default     = 8088
+}

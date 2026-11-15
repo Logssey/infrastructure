@@ -1,5 +1,7 @@
 # Logssey dashboard on one host (ADR-D010). Run from /opt/logssey as root.
 # Images come from .env (API_IMAGE, FRONTEND_IMAGE) pinned by digest.
+# Internet: ALB -> frontend :8088 -> api. The API signs people in with GitHub (Logssey org only).
+# Fallback: SSM port forwarding to localhost:8088 and the password admin.
 name: logssey
 
 services:
@@ -49,7 +51,7 @@ services:
         source: ./secrets/api
         target: /run/secrets
         read_only: true
-    tmpfs: [/tmp:rw,noexec,nosuid,size=64m,uid=10001,gid=10001,mode=0700]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m,uid=10001,gid=10001,mode=0700"]
     networks: [backend, frontend]
     logging:
       driver: json-file
@@ -65,8 +67,9 @@ services:
     restart: unless-stopped
     mem_limit: 128m
     pids_limit: 64
-    ports: ["127.0.0.1:8088:8080"]
-    tmpfs: [/tmp:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0700]
+    # Only the ALB security group (and SSM port forwarding) can reach this port.
+    ports: ["8088:8080"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0700"]
     depends_on: [api]
     networks: [frontend]
     logging:
