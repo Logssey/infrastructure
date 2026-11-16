@@ -79,3 +79,15 @@ variable "frontend_port" {
   type        = number
   default     = 8088
 }
+
+variable "github_org" {
+  description = "자동 배포 워크플로가 있는 GitHub 조직 (deploy.tf)"
+  type        = string
+  default     = "Logssey"
+}
+
+variable "deploy_branch" {
+  description = "이 브랜치에 머지되면 대시보드를 배포한다 (deploy.tf)"
+  type        = string
+  default     = "develop"
+}

@@ -19,3 +19,12 @@ output "ecr_repository_urls" {
 output "dashboard_url" {
   value = "https://${local.dashboard_fqdn}"
 }
+
+output "deploy_role_arns" {
+  description = "자동 배포 역할. dashboard-backend(api)·dashboard-frontend(frontend) 레포 변수 DASHBOARD_DEPLOY_ROLE_ARN 에 넣는다"
+  value       = { for name, role in aws_iam_role.deploy : name => role.arn }
+}
+
+output "deploy_document" {
+  value = aws_ssm_document.deploy.name
+}
