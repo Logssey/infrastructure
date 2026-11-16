@@ -28,3 +28,8 @@ output "deploy_role_arns" {
 output "deploy_document" {
   value = aws_ssm_document.deploy.name
 }
+
+output "reach_l1_collector_repository_url" {
+  description = "gitops reach/l1/collector-cronjob.yaml 의 image 앞부분 (뒤에 @sha256:<digest>)"
+  value       = aws_ecr_repository.reach_l1_collector.repository_url
+}
