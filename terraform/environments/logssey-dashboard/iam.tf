@@ -38,7 +38,10 @@ data "aws_iam_policy_document" "host_ecr_pull" {
       "ecr:BatchGetImage",
       "ecr:GetDownloadUrlForLayer",
     ]
-    resources = [for repo in aws_ecr_repository.this : repo.arn]
+    resources = concat(
+      [for repo in aws_ecr_repository.this : repo.arn],
+      [data.aws_ecr_repository.compliance_worker.arn],
+    )
   }
 }
 
