@@ -51,6 +51,10 @@ services:
         source: ./secrets/api
         target: /run/secrets
         read_only: true
+      - type: bind
+        source: ./aws/api
+        target: /run/aws
+        read_only: true
     tmpfs: ["/tmp:rw,noexec,nosuid,size=64m,uid=10001,gid=10001,mode=0700"]
     networks: [backend, frontend]
     logging:
@@ -100,6 +104,10 @@ services:
       - type: bind
         source: ./secrets/worker
         target: /run/secrets
+        read_only: true
+      - type: bind
+        source: ./aws/worker
+        target: /run/aws
         read_only: true
     tmpfs: ["/tmp:rw,noexec,nosuid,size=64m,uid=10001,gid=10001,mode=0700"]
     networks: [backend]
