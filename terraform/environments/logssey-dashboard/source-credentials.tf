@@ -61,6 +61,7 @@ data "aws_iam_policy_document" "source" {
         "secretsmanager:CreateSecret",
         "secretsmanager:PutSecretValue",
         "secretsmanager:DeleteSecret",
+        "secretsmanager:RestoreSecret",
         "secretsmanager:TagResource",
       ]
       resources = [local.source_secret_arn]
