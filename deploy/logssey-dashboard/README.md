@@ -63,6 +63,14 @@ sudo systemctl list-timers logssey-source-credentials.timer
 
 로그인 계정에 Secret의 OPERATIONS 역할을 부여하고 연결 관리에서 연결 테스트와 수동 스캔을 확인한다. 최초 스캔 결과와 워커 heartbeat를 확인한 뒤 정기 실행 시간을 점검한다. 설정 복구가 필요하면 보호한 설정 백업을 되돌리고 해당 컨테이너를 재생성한다. 역할 세션 갱신 오류는 `journalctl -u logssey-source-credentials.service`에서 확인하며 자격 증명 값은 로그에 기록하지 않는다.
 
+### Claude API 자격 증명
+
+Claude API 키는 `logssey/dashboard/ai/claude-api-key`라는 Secrets Manager 비밀의 문자열 값으로 관리한다. `api.properties`에는 비밀 이름과 리전을 설정한다. 대시보드 API는 `/run/aws/credentials.json`의 단기 API 역할 세션으로 값을 읽는다. 키 교체는 같은 비밀의 현재 버전을 갱신한다.
+
+`claude-api.tf`는 비밀 메타데이터를 참조하고 API 역할에 해당 비밀의 `GetSecretValue`, `DescribeSecret` 권한을 부여한다. 비밀을 먼저 생성한 뒤 Terraform을 적용한다. 키 값은 Terraform 입력이나 상태 파일에 넣지 않는다. 워커의 연결 비밀 조회 권한은 기존 source-credentials 경로를 사용한다.
+
+새 설정은 Secrets Manager 참조를 지원하는 API 이미지를 배포한 뒤 호스트의 `api.properties`에 반영한다. Claude 준비 상태와 합성 자료 기반 안내 요청, 제공자 오류 시 기본 안내 사용을 확인한다.
+
 ### 로컬 검증
 
 ```bash
