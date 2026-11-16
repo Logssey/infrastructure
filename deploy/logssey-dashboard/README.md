@@ -7,6 +7,8 @@
 - 호스트 파일: /opt/logssey (compose.yaml, api.properties, worker.properties, initdb/, .env, secrets/). 비밀값 파일은 저장소에 올리지 않는다
   - GitHub OAuth App client secret: secrets/api/spring.security.oauth2.client.registration.github.client-secret (소유 10001, 0400)
   - Secret 워커 DB 비밀번호: secrets/worker/spring.datasource.password (API 와 같은 값, 소유 10001, 0400). 수집을 켜면 Secret 담당이 정한 파일(Notion 토큰, 지문 키 등)을 같은 폴더에 둔다
+  - Notion 페이지 검사: Notion 연동 토큰 secrets/worker/notion-token 과 secrets/api/notion-token(API 는 연결 테스트용), 지문 키 secrets/worker/logssey.secret.detection.fingerprint-key(32바이트 이상 난수의 base64, 버전은 worker.properties). 모두 소유 10001, 0400. 지문 키·버전은 결과가 생긴 뒤 바꾸지 않는다(같은 키가 새 키로 보인다)
+  - Notion 검사 대상: 연결 `notion-internal:default` 한 줄(secret_connections)과 페이지마다 범위 한 줄(secret_connection_scopes, `notion://pages/<id>`). 등록 화면이 없어 SQL 로 넣는다. 범위는 그 페이지 본문만이고 하위 페이지는 따로 넣는다. 연동이 공유받지 않은 페이지는 NOTION_ACCESS_DENIED
 - Secret 워커(secret-worker): dashboard-backend 의 secret-worker 를 API 와 같은 커밋으로 띄운다. 웹 포트 없이 DB 와 승인된 수집 대상만 본다. worker.properties 는 처음에 예약·실행·수집을 모두 끈다. 켜는 것은 Secret 담당이 정해 이 레포 PR 로 바꾼다
 - 업데이트(자동): dashboard-backend·dashboard-frontend 의 develop 에 머지되면 각 레포의 `Dashboard deploy` 워크플로가 테스트 → 이미지 push → SSM 문서 `logssey-dashboard-deploy` 로 호스트의 `/opt/logssey/deploy.sh api|frontend|worker <digest>` 를 부른다 (terraform deploy.tf). dashboard-backend 는 API 를 배포한 뒤 같은 커밋의 워커를 배포한다(레포 변수 `DASHBOARD_DEPLOY_WORKER=true` 일 때)
   - deploy.sh: (api 만) DB 덤프 `/var/lib/logssey/backups/` 최근 5개 → .env digest 교체 → pull·재생성(api 면 nginx 도 재시작) → 상태 확인 → 안 되면 이전 digest 로 되돌리고 실패. 기록은 `/opt/logssey/deploy.log`
