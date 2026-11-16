@@ -2,15 +2,16 @@
 # 대시보드 자동 배포: develop 머지 → GitHub Actions(테스트 → 이미지 push) → SSM 으로 호스트의 deploy.sh
 #
 # dashboard-backend·dashboard-frontend 의 develop 브랜치 워크플로만 역할을 받는다.
-# 역할은 자기 ECR 한 곳에 push 하고, 이 호스트에 아래 SSM 문서 하나만 보낼 수 있다.
+# 역할은 자기 레포의 이미지 저장소에 push 하고, 이 호스트에 아래 SSM 문서 하나만 보낼 수 있다.
+# dashboard-backend 는 API 와 Secret 워커 두 이미지를 같은 커밋으로 만든다.
 # 문서는 서비스 이름과 digest 만 받아 /opt/logssey/deploy.sh 를 부르므로 임의 명령은 보낼 수 없다.
 # deploy.sh(레포 deploy/logssey-dashboard/)는 DB 덤프, .env digest 교체, 상태 확인, 실패 시 되돌리기를 한다.
 # ─────────────────────────────────────────────
 
 locals {
   deploy_targets = {
-    api      = { repo = "dashboard-backend", ecr = "dashboard-api" }
-    frontend = { repo = "dashboard-frontend", ecr = "dashboard-frontend" }
+    api      = { repo = "dashboard-backend", ecr = ["dashboard-api", "dashboard-secret-worker"] }
+    frontend = { repo = "dashboard-frontend", ecr = ["dashboard-frontend"] }
   }
 }
 
@@ -30,7 +31,7 @@ resource "aws_ssm_document" "deploy" {
     parameters = {
       service = {
         type          = "String"
-        allowedValues = ["api", "frontend"]
+        allowedValues = ["api", "frontend", "worker"]
       }
       digest = {
         type           = "String"
@@ -96,7 +97,7 @@ data "aws_iam_policy_document" "deploy" {
     resources = ["*"]
   }
 
-  # 자기 이미지 저장소 한 곳. 태그는 바꿀 수 없다 (ecr.tf IMMUTABLE).
+  # 자기 레포의 이미지 저장소. 태그는 바꿀 수 없다 (ecr.tf IMMUTABLE).
   statement {
     sid = "EcrPushOwnImage"
     actions = [
@@ -109,7 +110,7 @@ data "aws_iam_policy_document" "deploy" {
       "ecr:PutImage",
       "ecr:UploadLayerPart",
     ]
-    resources = [aws_ecr_repository.this[each.value.ecr].arn]
+    resources = [for ecr in each.value.ecr : aws_ecr_repository.this[ecr].arn]
   }
 
   # 이 호스트에, 배포 문서만

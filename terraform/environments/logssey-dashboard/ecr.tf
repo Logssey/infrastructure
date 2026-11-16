@@ -1,6 +1,7 @@
 # 태그를 바꿀 수 없게 하고, compose 에는 digest 로 고정한다.
+# dashboard-secret-worker: dashboard-backend 의 Secret 워커(Dockerfile --target worker). API 와 같은 커밋으로 만든다.
 resource "aws_ecr_repository" "this" {
-  for_each = toset(["dashboard-api", "dashboard-frontend"])
+  for_each = toset(["dashboard-api", "dashboard-frontend", "dashboard-secret-worker"])
 
   name                 = "${var.project}/${each.key}"
   image_tag_mutability = "IMMUTABLE"

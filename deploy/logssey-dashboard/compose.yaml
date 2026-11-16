@@ -1,5 +1,5 @@
 # Logssey dashboard on one host (ADR-D010). Run from /opt/logssey as root.
-# Images come from .env (API_IMAGE, FRONTEND_IMAGE) pinned by digest.
+# Images come from .env (API_IMAGE, FRONTEND_IMAGE, WORKER_IMAGE) pinned by digest.
 # Internet: ALB -> frontend :8088 -> api. The API signs people in with GitHub (Logssey org only).
 # Fallback: SSM port forwarding to localhost:8088 and the password admin.
 name: logssey
@@ -72,6 +72,37 @@ services:
     tmpfs: ["/tmp:rw,noexec,nosuid,size=16m,uid=101,gid=101,mode=0700"]
     depends_on: [api]
     networks: [frontend]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+
+  # Secret worker (dashboard-backend secret-worker, Dockerfile --target worker): no web port, talks to the DB
+  # and, once enabled in worker.properties, to the approved sources (GitHub, AWS, Notion) over HTTPS.
+  # Same commit as the API; deploy.sh worker runs after deploy.sh api.
+  secret-worker:
+    image: ${WORKER_IMAGE:?Set WORKER_IMAGE in .env}
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    mem_limit: 1g
+    pids_limit: 128
+    depends_on:
+      db: {condition: service_healthy}
+    volumes:
+      - type: bind
+        source: ./worker.properties
+        target: /run/config/application.properties
+        read_only: true
+      - type: bind
+        source: ./secrets/worker
+        target: /run/secrets
+        read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m,uid=10001,gid=10001,mode=0700"]
+    networks: [backend]
     logging:
       driver: json-file
       options: {max-size: 10m, max-file: "3"}
