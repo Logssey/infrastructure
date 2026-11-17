@@ -77,3 +77,30 @@ Claude API 키는 `logssey/dashboard/ai/claude-api-key`라는 Secrets Manager �
 python3 -m unittest discover -s deploy/logssey-dashboard -p test_publish_aws_credentials.py
 terraform -chdir=terraform/environments/logssey-dashboard fmt -check
 ```
+
+## IaC 보안 워커 (IaC 보안 ADR-13)
+
+IaC 워커(`iac-worker`)는 그래프 보강, PR 경로 분석, State·드리프트 점검을 한다. 웹 포트가 없고, DB는 IaC 전용 계정 `logssey_iac`(IaC 테이블별 최소 권한)로, AWS는 읽기 전용 역할(`logssey-dashboard-role-iac-worker`: CloudFront 배포 목록, IAM 시뮬레이터)로만 쓴다.
+
+- 호스트의 `compose.yaml`·`deploy.sh`는 덮어쓰지 않는다. Compliance 워커처럼 다른 솔루션이 호스트 파일을 직접 고쳐 두었으므로, `bootstrap-iac-host.py`가 IaC 부분만 더한다(백업을 남기고, 다시 돌려도 바뀌지 않음)
+- `iac-worker` 서비스는 compose profile `iac`라서 `docker compose up -d`로는 뜨지 않는다. `deploy.sh iac-worker <digest>`만 띄운다
+- AWS 세션은 Secret과 같은 방식(호스트 역할 → 1시간 세션 파일, 10분마다 갱신)이지만 IaC 전용 스크립트·타이머(`publish-iac-credentials.py`, `logssey-iac-credentials.timer`)를 쓴다. 세션 이름은 `logssey-iac-worker`. 컨테이너는 `credential_process`(`iac-worker.aws-config`)로 파일을 읽는다
+
+**처음 한 번 (순서대로)**
+
+1. Terraform 적용: `terraform/environments/logssey-dashboard` (ECR `logssey/dashboard-iac-worker`, IaC 워커 역할, 배포 역할·SSM 문서에 `iac-worker` 추가). plan에서 SSM 문서의 `allowedValues`가 지금 호스트에서 쓰는 값을 지우지 않는지 확인한다
+2. 이 폴더의 IaC 파일을 호스트 `/opt/logssey`에 복사: `iac-worker.properties`, `iac-worker.aws-config`, `publish-iac-credentials.py`, `iac-db-role.sh`, `bootstrap-iac-host.py`, `logssey-iac-credentials.service`, `logssey-iac-credentials.timer`
+3. `iac-credentials.json`: `iac-credentials.example.json`을 복사하고 `worker_role_arn`을 Terraform 출력 `iac_worker_role_arn`으로 맞춘다
+4. DB 비밀번호: `secrets/iac-worker/spring.datasource.password`에 무작위 값(개행 없이), 폴더·파일 소유 10001, 폴더 0500·파일 0400
+5. `sudo python3 bootstrap-iac-host.py` → `compose.yaml`·`deploy.sh`·`.env`에 IaC 부분 추가 (`.env`에는 `IAC_WORKER_IMAGE` 자리표시 값)
+6. `sudo ./iac-db-role.sh` → `logssey_iac` 계정과 권한 (API가 IaC 마이그레이션 V11·V12를 적용한 뒤)
+7. 세션 타이머: `sudo cp logssey-iac-credentials.* /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now logssey-iac-credentials.timer` → `aws-iac/worker/credentials.json` 생기는지 확인
+8. dashboard-backend 레포 변수 `DASHBOARD_DEPLOY_IAC_WORKER=true` → 다음 develop 머지(또는 `Dashboard deploy` 다시 실행)에서 워커가 배포된다. 실패하면 처음 배포는 워커만 지우고 다른 서비스는 그대로 둔다
+
+**확인**: `sudo docker compose ps iac-worker`가 재시작 없이 돈다. 자산 그래프(Neo4j)를 붙이기 전에는 그래프·분석 작업이 대기 상태로 남는다(오류 아님).
+
+**IaC 테이블을 새로 만들 때**: `iac-db-role.sh`에 GRANT를 더하고 호스트에서 다시 실행한다.
+
+```bash
+python3 -m unittest discover -s deploy/logssey-dashboard -p 'test_*iac*.py'
+```
