@@ -15,6 +15,7 @@ KEEP_BACKUPS=${LOGSSEY_KEEP_BACKUPS:-5}
 BASE_URL=${LOGSSEY_BASE_URL:-http://127.0.0.1:8088}
 HEALTH_TIMEOUT=${LOGSSEY_HEALTH_TIMEOUT:-300}
 WORKER_SETTLE=${LOGSSEY_WORKER_SETTLE:-60}
+IAC_WORKER_SETTLE=${LOGSSEY_IAC_WORKER_SETTLE:-60}
 # SSM runs without HOME; the ECR credential helper is configured in /root/.docker (host-init.sh.tftpl)
 export DOCKER_CONFIG=${DOCKER_CONFIG:-/root/.docker}
 
@@ -24,6 +25,7 @@ case $service in
   api) var=API_IMAGE container=api ;;
   frontend) var=FRONTEND_IMAGE container=frontend ;;
   worker) var=WORKER_IMAGE container=secret-worker ;;
+  iac-worker) var=IAC_WORKER_IMAGE container=iac-worker ;;
   *) echo "usage: deploy.sh api|frontend|worker sha256:<digest>" >&2; exit 2 ;;
 esac
 [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "invalid digest: $digest" >&2; exit 2; }
@@ -44,6 +46,15 @@ record() { printf '%s %s %s %s\n' "$(date -u +%FT%TZ)" "$service" "$digest" "$1"
 
 healthy() {
   if [ "$service" = worker ]; then worker_healthy; return; fi
+  if [ "$service" = iac-worker ]; then
+    sleep "$IAC_WORKER_SETTLE"
+    local id state
+    id=$(docker compose ps -q "$container") && [ -n "$id" ] || return 1
+    state=$(docker inspect -f '{{.State.Running}} {{.RestartCount}}' "$id") || return 1
+    echo "iac worker after ${IAC_WORKER_SETTLE}s: running/restarts = $state"
+    [ "$state" = "true 0" ]
+    return
+  fi
   # the page and the API (through nginx) both answer
   local deadline=$((SECONDS + HEALTH_TIMEOUT))
   while [ "$SECONDS" -lt "$deadline" ]; do
@@ -98,6 +109,12 @@ fi
 echo "new $service is not healthy; last log lines:" >&2
 docker compose logs --no-color --tail 60 "$container" >&2 || true
 sed -i "s|^$var=.*|$var=$current|" .env
+if [ "$service" = iac-worker ] && [[ "$current" =~ @sha256:0{64}$ ]]; then
+  docker compose rm -sf "$container" >/dev/null 2>&1 || true
+  record rolled-back
+  echo "removed failed initial iac worker; existing services were not changed" >&2
+  exit 1
+fi
 if recreate && healthy; then
   record rolled-back
   echo "rolled back to $current" >&2
