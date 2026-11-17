@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 
 HERE = Path(__file__).parent
 
@@ -51,6 +52,15 @@ class BootstrapIacHostTest(unittest.TestCase):
             script.write(deploy)
             script.flush()
             subprocess.run(["bash", "-n", script.name], check=True)
+
+    def test_session_directory_is_created_for_the_credentials_service(self):
+        with tempfile.TemporaryDirectory() as folder, \
+                unittest.mock.patch.object(iac.os, "chown") as chown:
+            directory = iac.ensure_session_directory(Path(folder))
+            self.assertTrue(directory.is_dir())
+            self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+            chown.assert_called_once_with(directory, 0, 0)
+            iac.ensure_session_directory(Path(folder))  # already there: no error
 
     def test_env_keeps_an_existing_image(self):
         self.assertEqual(iac.set_env("A=1\nIAC_WORKER_IMAGE=x@sha256:1\n", "IAC_WORKER_IMAGE", "y"),

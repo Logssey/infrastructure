@@ -92,7 +92,7 @@ IaC 워커(`iac-worker`)는 그래프 보강, PR 경로 분석, State·드리프
 2. 이 폴더의 IaC 파일을 호스트 `/opt/logssey`에 복사: `iac-worker.properties`, `iac-worker.aws-config`, `publish-iac-credentials.py`, `iac-db-role.sh`, `bootstrap-iac-host.py`, `logssey-iac-credentials.service`, `logssey-iac-credentials.timer`
 3. `iac-credentials.json`: `iac-credentials.example.json`을 복사하고 `worker_role_arn`을 Terraform 출력 `iac_worker_role_arn`으로 맞춘다
 4. DB 비밀번호: `secrets/iac-worker/spring.datasource.password`에 무작위 값(개행 없이), 폴더·파일 소유 10001, 폴더 0500·파일 0400
-5. `sudo python3 bootstrap-iac-host.py` → `compose.yaml`·`deploy.sh`·`.env`에 IaC 부분 추가 (`.env`에는 `IAC_WORKER_IMAGE` 자리표시 값)
+5. `sudo python3 bootstrap-iac-host.py` → `compose.yaml`·`deploy.sh`·`.env`에 IaC 부분 추가 (`.env`에는 `IAC_WORKER_IMAGE` 자리표시 값), 세션 폴더 `aws-iac/`(root, 0700) 생성. 이 폴더가 없으면 7번 서비스가 `226/NAMESPACE`로 실패한다
 6. `sudo ./iac-db-role.sh` → `logssey_iac` 계정과 권한 (API가 IaC 마이그레이션 V11·V12를 적용한 뒤)
 7. 세션 타이머: `sudo cp logssey-iac-credentials.* /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now logssey-iac-credentials.timer` → `aws-iac/worker/credentials.json` 생기는지 확인
 8. dashboard-backend 레포 변수 `DASHBOARD_DEPLOY_IAC_WORKER=true` → 다음 develop 머지(또는 `Dashboard deploy` 다시 실행)에서 워커가 배포된다. 실패하면 처음 배포는 워커만 지우고 다른 서비스는 그대로 둔다

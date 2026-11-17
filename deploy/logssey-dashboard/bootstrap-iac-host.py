@@ -129,6 +129,15 @@ def set_env(text, key, value):
     return text.rstrip("\n") + f"\n{key}={value}\n"
 
 
+def ensure_session_directory(root):
+    """aws-iac/ must exist before logssey-iac-credentials.service starts: its ReadWritePaths fails otherwise (226/NAMESPACE)."""
+    directory = root / "aws-iac"
+    directory.mkdir(mode=0o700, exist_ok=True)
+    os.chown(directory, 0, 0)
+    os.chmod(directory, 0o700)
+    return directory
+
+
 def atomic_write(path, text, mode):
     descriptor, temporary = tempfile.mkstemp(prefix="." + path.name + "-", dir=path.parent)
     try:
@@ -159,6 +168,7 @@ def main():
     for path in (compose, deploy, env_file):
         shutil.copy2(path, path.with_name(f"{path.name}.bak-{stamp}"))
 
+    ensure_session_directory(root)
     atomic_write(env_file, set_env(env_file.read_text(encoding="utf-8"), "IAC_WORKER_IMAGE", PLACEHOLDER_IMAGE), 0o600)
     atomic_write(compose, patch_compose(compose.read_text(encoding="utf-8")), 0o644)
     atomic_write(deploy, patch_deploy_script(deploy.read_text(encoding="utf-8")), 0o755)
