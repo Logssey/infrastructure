@@ -10,7 +10,7 @@
 
 locals {
   deploy_targets = {
-    api      = { repo = "dashboard-backend", ecr = ["dashboard-api", "dashboard-secret-worker"] }
+    api      = { repo = "dashboard-backend", ecr = ["dashboard-api", "dashboard-secret-worker", "dashboard-iac-worker"] }
     frontend = { repo = "dashboard-frontend", ecr = ["dashboard-frontend"] }
   }
 }
@@ -31,7 +31,7 @@ resource "aws_ssm_document" "deploy" {
     parameters = {
       service = {
         type          = "String"
-        allowedValues = ["api", "frontend", "worker"]
+        allowedValues = ["api", "frontend", "worker", "iac-worker"]
       }
       digest = {
         type           = "String"
