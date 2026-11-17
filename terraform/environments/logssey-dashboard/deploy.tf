@@ -13,6 +13,12 @@ locals {
     api      = { repo = "dashboard-backend", ecr = ["dashboard-api", "dashboard-secret-worker", "dashboard-iac-worker"] }
     frontend = { repo = "dashboard-frontend", ecr = ["dashboard-frontend"] }
   }
+  # Compliance 워커 이미지는 이 환경 밖에서 만든 저장소(ecr.tf data source)에 dashboard-backend 가 push 한다.
+  # 운영에 이미 적용된 권한·허용값을 코드에 기록한 것이다 (dashboard-backend Dashboard deploy 의 compliance-worker 단계).
+  deploy_extra_ecr_arns = {
+    api      = [data.aws_ecr_repository.compliance_worker.arn]
+    frontend = []
+  }
 }
 
 # Re:Used prod 의 iam 모듈이 만든 GitHub OIDC 제공자를 읽기만 한다 (prod 상태는 읽지 않는다).
@@ -31,7 +37,7 @@ resource "aws_ssm_document" "deploy" {
     parameters = {
       service = {
         type          = "String"
-        allowedValues = ["api", "frontend", "worker", "iac-worker"]
+        allowedValues = ["api", "frontend", "worker", "compliance-worker", "iac-worker"]
       }
       digest = {
         type           = "String"
@@ -110,7 +116,7 @@ data "aws_iam_policy_document" "deploy" {
       "ecr:PutImage",
       "ecr:UploadLayerPart",
     ]
-    resources = [for ecr in each.value.ecr : aws_ecr_repository.this[ecr].arn]
+    resources = concat([for ecr in each.value.ecr : aws_ecr_repository.this[ecr].arn], local.deploy_extra_ecr_arns[each.key])
   }
 
   # 이 호스트에, 배포 문서만
