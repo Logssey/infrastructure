@@ -12,9 +12,9 @@
 
 locals {
   # 서비스 레포 → 그 레포의 Reach 워크플로가 받을 이미지 저장소.
-  # 채팅 서버(Node)는 Reach L2 를 지원하지 않아 넣지 않았다.
+  # 채팅 서버(Node)는 L2 없이 SBOM·CVE 대조만 한다(이미지에 앱 jar가 없으면 러너가 L2를 건너뜀).
   reach_ci_image_repositories = {
-    "service-backend" = ["reused-api"]
+    "service-backend" = ["reused-api", "reused-chat"]
   }
   # 서비스 레포의 GitHub 기본 브랜치 (대시보드 api.properties logssey.reach.ci.default-branch 와 같게)
   reach_ci_branch = "develop"
