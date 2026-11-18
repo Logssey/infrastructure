@@ -5,7 +5,8 @@
 # iac-gate 가 남긴 iac-result 아티팩트를 받아 PR 에 검사 "plan 전 검사" 와 코멘트 하나를 등록한다.
 # 같은 결과와 민감값을 지운 plan 을 IaC 보안 대시보드(API)에도 올린다 (GitHub OIDC, aud logssey-iac).
 # 대시보드는 sub 가 이 environment(iac-app)인 토큰만 받는다. PR 코드(iac-gate)는 이 토큰을 받을 수 없다.
-# 대시보드 전송이 실패해도 PR 검사·코멘트는 그대로 남는다 (경고만).
+# 분석이 끝나면 검사 "경로 분석"(차단이면 실패)을 등록하고 코멘트에 ① 경로 분석 절을 붙인다 (최대 5분 대기).
+# 대시보드 전송이 실패해도 PR 검사·코멘트는 그대로 남는다 (경고만, "경로 분석"은 중립).
 #
 # App 키는 배포 브랜치를 main 으로 제한한 environment(iac-app)의 secret 이라 PR 코드는 읽을 수 없다.
 # 이 워크플로는 PR 코드를 checkout·실행하지 않고, 아티팩트는 policy/report.sh 가 형식을 검사한 데이터로만 쓴다.
@@ -28,7 +29,7 @@ jobs:
     name: Report to PR
     if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 12 # 경로 분석 대기 최대 5분 포함
     environment: iac-app
     permissions:
       actions: read # iac-gate 실행의 아티팩트를 받음
@@ -121,6 +122,7 @@ jobs:
 
       # 토큰은 로그에 가리고, curl 인자가 아니라 권한 0600 파일로 넘긴다.
       - name: Send to dashboard
+        id: dashboard
         if: steps.post.outputs.current == 'true' && vars.IAC_DASHBOARD_URL != ''
         continue-on-error: true
         env:
@@ -142,6 +144,7 @@ jobs:
           run_id=$(jq -r .runId <<<"$created")
           status=$(jq -r .status <<<"$created")
           echo "대시보드 실행 등록: run $run_id ($status)"
+          echo "run_id=$run_id" >>"$GITHUB_OUTPUT"
 
           plan="$RUNNER_TEMP/plan/plan.scrubbed.json"
           if [ "$status" = PLANNING ] && [ -f "$plan" ]; then
@@ -149,6 +152,83 @@ jobs:
             curl -sS --fail-with-body --max-time 60 -X PUT -H @"$RUNNER_TEMP/auth" -H 'Content-Type: application/gzip' \
               --data-binary @"$RUNNER_TEMP/plan.json.gz" "$api/$run_id/plan" -o /dev/null || warn "plan 업로드"
             echo "plan 업로드: 대시보드가 경로 분석 중"
+            echo "analyzing=true" >>"$GITHUB_OUTPUT"
           elif [ "$status" = PLANNING ]; then
             echo "::notice::plan 이 없어 대시보드는 gate 결과만 가짐 (포크 PR 또는 plan 안 함)"
           fi
+
+      # 분석이 끝나기를 기다려(10초 간격, 최대 5분) "경로 분석" 검사를 등록하고 코멘트에 ① 절을 붙인다.
+      # 대시보드에 닿지 못했거나 plan 이 없으면 중립으로 등록한다 (필수 검사가 아니라 PR 을 막지 않음).
+      - name: Path analysis check and comment
+        if: always() && steps.post.outputs.current == 'true' && vars.IAC_DASHBOARD_URL != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          DASHBOARD_URL: ${{ vars.IAC_DASHBOARD_URL }}
+          REPO: ${{ github.repository }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          BOT: ${{ steps.app.outputs.app-slug }}[bot]
+          RUN_ID: ${{ steps.dashboard.outputs.run_id }}
+          ANALYZING: ${{ steps.dashboard.outputs.analyzing }}
+        run: |
+          set -o pipefail
+          umask 077
+          in="$RUNNER_TEMP/in/result.json"
+          out="$RUNNER_TEMP/path"
+          pr=$(jq -r .pr "$in")
+          api="${DASHBOARD_URL%/}/api/v1/iac/runs"
+          mkdir -p "$out"
+          fallback() { # 결론 제목 문구
+            printf '%s\n' "$1" >"$out/conclusion"
+            printf '%s\n' "경로 분석: $2" >"$out/title"
+            printf '\n**① 경로 분석: %s**\n\n%s\n' "$2" "$3" >"$out/section.md"
+          }
+
+          # OIDC 토큰은 몇 분만 유효해서 새로 받는다
+          token=
+          [ -z "$RUN_ID" ] || token=$(curl -sSf --max-time 30 -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+                                        "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=logssey-iac" | jq -re .value) || token=
+          if [ -z "$token" ]; then
+            fallback neutral "대시보드에 연결하지 못함" "대시보드 전송이 실패해 경로 분석을 하지 않았어요. Actions 로그를 확인하세요."
+          else
+            echo "::add-mask::$token"
+            printf 'Authorization: Bearer %s\n' "$token" >"$RUNNER_TEMP/auth"
+            if [ "$ANALYZING" = true ]; then
+              for _ in $(seq 30); do
+                status=$(curl -sSf --max-time 15 -H @"$RUNNER_TEMP/auth" "$api/$RUN_ID" | jq -r .status) || status=
+                case "$status" in DONE|ERROR|SUPERSEDED|GATE_FAILED) break ;; esac
+                sleep 10
+              done
+            fi
+            if curl -sSf --max-time 30 -H @"$RUNNER_TEMP/auth" "$api/$RUN_ID/result" -o "$RUNNER_TEMP/run-result.json"; then
+              if [ "$ANALYZING" != true ] && [ "$(jq -r .status "$RUNNER_TEMP/run-result.json")" = PLANNING ]; then
+                fallback neutral "plan 없음" "plan 이 없어 경로 분석을 하지 않았어요 (포크 PR 또는 plan 안 함)."
+              else
+                policy/path-report.sh "$RUNNER_TEMP/run-result.json" "$out" "$DASHBOARD_URL"
+              fi
+            else
+              fallback neutral "결과를 받지 못함" "대시보드에서 결과를 받지 못했어요. 대시보드에서 확인하세요."
+            fi
+          fi
+          echo "$(cat "$out/title") ($(cat "$out/conclusion"))"
+
+          # 기다리는 동안 새 커밋이 올라왔으면 이 결과는 등록하지 않는다
+          head=$(gh api "repos/$REPO/pulls/$pr" --jq .head.sha)
+          if [ "$head" != "$RUN_SHA" ]; then
+            echo "::notice::PR #$pr 에 새 커밋($head)이 있어 경로 분석 결과는 등록하지 않음"
+            exit 0
+          fi
+
+          jq -n --arg sha "$RUN_SHA" --arg url "$RUN_URL" \
+                --rawfile conclusion "$out/conclusion" --rawfile title "$out/title" --rawfile body "$out/section.md" \
+            '{name: "경로 분석", head_sha: $sha, status: "completed", details_url: $url,
+              conclusion: ($conclusion | rtrimstr("\n")),
+              output: {title: ($title | rtrimstr("\n")), summary: $body}}' |
+            gh api "repos/$REPO/check-runs" --input - --jq '"검사 등록: \(.html_url)"'
+
+          # 요약 코멘트 = ② 절(앞 단계의 body.md) + ① 절. 앞 단계가 단 코멘트를 고친다.
+          id=$(gh api --paginate "repos/$REPO/issues/$pr/comments" \
+                 --jq ".[] | select(.user.login == \"$BOT\" and (.body | startswith(\"<!-- logssey-iac -->\"))) | .id" | head -n1)
+          [ -n "$id" ] || { echo "::warning::요약 코멘트를 찾지 못해 ① 절을 붙이지 않음"; exit 0; }
+          jq -n --rawfile gate "$RUNNER_TEMP/out/body.md" --rawfile path "$out/section.md" '{body: ($gate + $path)}' |
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" --input - --jq '"코멘트 고침: \(.html_url)"'
