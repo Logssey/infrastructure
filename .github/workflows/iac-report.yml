@@ -3,6 +3,9 @@
 #
 # iac-gate 가 끝나면 기본 브랜치(main)의 이 파일·코드로 돈다 (workflow_run).
 # iac-gate 가 남긴 iac-result 아티팩트를 받아 PR 에 검사 "plan 전 검사" 와 코멘트 하나를 등록한다.
+# 같은 결과와 민감값을 지운 plan 을 IaC 보안 대시보드(API)에도 올린다 (GitHub OIDC, aud logssey-iac).
+# 대시보드는 sub 가 이 environment(iac-app)인 토큰만 받는다. PR 코드(iac-gate)는 이 토큰을 받을 수 없다.
+# 대시보드 전송이 실패해도 PR 검사·코멘트는 그대로 남는다 (경고만).
 #
 # App 키는 배포 브랜치를 main 으로 제한한 environment(iac-app)의 secret 이라 PR 코드는 읽을 수 없다.
 # 이 워크플로는 PR 코드를 checkout·실행하지 않고, 아티팩트는 policy/report.sh 가 형식을 검사한 데이터로만 쓴다.
@@ -30,6 +33,7 @@ jobs:
     permissions:
       actions: read # iac-gate 실행의 아티팩트를 받음
       contents: read # 기본 브랜치의 policy/ 를 받음
+      id-token: write # 대시보드 API 인증 (GitHub OIDC)
     steps:
       # 기본 브랜치 코드다 (workflow_run 의 기본 ref). PR 코드가 아니다.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -59,6 +63,7 @@ jobs:
       # 결과의 SHA 가 이 실행의 SHA 와 같고, PR 의 지금 head 와도 같을 때만 등록한다.
       # (늦게 끝난 이전 커밋의 실행이 새 결과를 덮어쓰지 않게)
       - name: Post check and comment
+        id: post
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REPO: ${{ github.repository }}
@@ -83,6 +88,7 @@ jobs:
           gh api --paginate "repos/$REPO/pulls/$pr/files" --jq '.[] | .filename, (.previous_filename // empty)' \
             >"$RUNNER_TEMP/changed.txt"
           policy/report.sh "$in" "$out" "$RUNNER_TEMP/changed.txt"
+          echo "current=true" >>"$GITHUB_OUTPUT"
 
           jq -n --arg sha "$sha" --arg url "$RUN_URL" \
                 --rawfile conclusion "$out/conclusion" --rawfile title "$out/title" --rawfile body "$out/body.md" \
@@ -99,4 +105,50 @@ jobs:
             gh api -X PATCH "repos/$REPO/issues/comments/$id" --input - --jq '"코멘트 고침: \(.html_url)"' <<<"$body"
           else
             gh api "repos/$REPO/issues/$pr/comments" --input - --jq '"코멘트 등록: \(.html_url)"' <<<"$body"
+          fi
+
+      # ── 대시보드 (IaC 보안 6단계). 지금 head 의 결과일 때만, 레포 변수 IAC_DASHBOARD_URL 이 있을 때만 ──
+      # plan-prod 는 gate 를 통과하고 plan 이 성공한 PR 에만 있다 (없으면 등록만 한다).
+      - name: Download scrubbed plan
+        if: steps.post.outputs.current == 'true' && vars.IAC_DASHBOARD_URL != ''
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: plan-prod
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/plan
+
+      # 토큰은 로그에 가리고, curl 인자가 아니라 권한 0600 파일로 넘긴다.
+      - name: Send to dashboard
+        if: steps.post.outputs.current == 'true' && vars.IAC_DASHBOARD_URL != ''
+        continue-on-error: true
+        env:
+          DASHBOARD_URL: ${{ vars.IAC_DASHBOARD_URL }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -o pipefail
+          umask 077
+          warn() { echo "::warning::대시보드 전송 실패: $1 (PR 검사·코멘트는 등록됨)"; exit 1; }
+          token=$(curl -sSf --max-time 30 -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+                    "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=logssey-iac" | jq -re .value) || warn "OIDC 토큰"
+          echo "::add-mask::$token"
+          printf 'Authorization: Bearer %s\n' "$token" >"$RUNNER_TEMP/auth"
+          api="${DASHBOARD_URL%/}/api/v1/iac/runs"
+
+          policy/dashboard-run.sh "$RUNNER_TEMP/in/result.json" "$REPO" "$RUNNER_TEMP/changed.txt" >"$RUNNER_TEMP/run.json"
+          created=$(curl -sS --fail-with-body --max-time 30 -H @"$RUNNER_TEMP/auth" -H 'Content-Type: application/json' \
+                      --data @"$RUNNER_TEMP/run.json" "$api") || warn "실행 등록 ($created)"
+          run_id=$(jq -r .runId <<<"$created")
+          status=$(jq -r .status <<<"$created")
+          echo "대시보드 실행 등록: run $run_id ($status)"
+
+          plan="$RUNNER_TEMP/plan/plan.scrubbed.json"
+          if [ "$status" = PLANNING ] && [ -f "$plan" ]; then
+            gzip -c "$plan" >"$RUNNER_TEMP/plan.json.gz"
+            curl -sS --fail-with-body --max-time 60 -X PUT -H @"$RUNNER_TEMP/auth" -H 'Content-Type: application/gzip' \
+              --data-binary @"$RUNNER_TEMP/plan.json.gz" "$api/$run_id/plan" -o /dev/null || warn "plan 업로드"
+            echo "plan 업로드: 대시보드가 경로 분석 중"
+          elif [ "$status" = PLANNING ]; then
+            echo "::notice::plan 이 없어 대시보드는 gate 결과만 가짐 (포크 PR 또는 plan 안 함)"
           fi
