@@ -86,6 +86,20 @@ class BootstrapIacHostTest(unittest.TestCase):
             self.assertEqual((root / "secrets/neo4j/neo4j-auth").read_text(), auth)
             self.assertEqual((root / "secrets/iac-worker/logssey.iac.graph.password").read_text(), worker)
 
+    def test_placeholder_names_the_real_repository_so_deploy_sh_can_pull(self):
+        registry = "123456789012.dkr.ecr.ap-northeast-1.amazonaws.com"
+        env = f"API_IMAGE={registry}/logssey/dashboard-api@sha256:{'a' * 64}\n"
+        expected = f"IAC_WORKER_IMAGE={registry}/logssey/dashboard-iac-worker@sha256:{'0' * 64}"
+        self.assertIn(expected, iac.set_iac_image(env))
+        # the unpullable value from the first bootstrap is corrected
+        old = env + "IAC_WORKER_IMAGE=" + iac.OLD_PLACEHOLDER + "\n"
+        self.assertEqual(iac.set_iac_image(old), env + expected + "\n")
+        # a deployed image is never touched
+        deployed = env + f"IAC_WORKER_IMAGE={registry}/logssey/dashboard-iac-worker@sha256:{'b' * 64}\n"
+        self.assertEqual(iac.set_iac_image(deployed), deployed)
+        with self.assertRaises(RuntimeError):
+            iac.set_iac_image("FRONTEND_IMAGE=x\n")
+
     def test_env_keeps_an_existing_image(self):
         self.assertEqual(iac.set_env("A=1\nIAC_WORKER_IMAGE=x@sha256:1\n", "IAC_WORKER_IMAGE", "y"),
                          "A=1\nIAC_WORKER_IMAGE=x@sha256:1\n")
