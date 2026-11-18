@@ -9,6 +9,7 @@ PR 의 `.tf` 를 `terraform init`·`plan` 전에 Conftest 로 검사한다.
 | `gate_test.rego` | 단위 테스트. 위험 시나리오 S1~S4·S6 와 경계 사례 |
 | `gate.sh` | plan 전 검사 전체 (관문 0·1·2·3·2b). CI 와 `make plan` 이 같이 쓴다 |
 | `module-hashes.txt` | 원격 모듈 내용 해시 기준 (관문 2b) |
+| `dashboard-run.sh` | `iac-report` 가 IaC 보안 대시보드에 올릴 실행 등록 본문 (테스트 `dashboard-run_test.sh`) |
 
 ## 실행
 
@@ -64,6 +65,16 @@ make gate            # gate 만, 자격 증명 없음
     - 사람이 쓰는 `.terraform` 은 건드리지 않는다.
 
 plan-ro Role 을 쓸 수 있는 사람은 `terraform/environments/prod/main.tf` 의 `iac_plan_local_users` 로 정한다.
+
+## 대시보드 전송 (`iac-report`)
+
+`iac-report` 는 PR 검사·코멘트를 등록한 뒤, 같은 결과와 민감값을 지운 plan 을 IaC 보안 대시보드에 올린다.
+대시보드가 경로 분석(①)과 State 점검을 하고 IaC 탭에 PR 판정을 보여 준다.
+
+- 인증: GitHub Actions OIDC 토큰(aud `logssey-iac`). 대시보드는 sub 가 `repo:Logssey/infrastructure:environment:iac-app` 인 토큰만 받는다. `iac-app` 은 main 만 쓰는 environment 라 PR 코드는 이 토큰을 받을 수 없다
+- 설정: 레포 변수 `IAC_DASHBOARD_URL` (예: `https://logssey.re-used.store`). 없으면 대시보드 전송 단계를 건너뛴다
+- 실패해도 PR 검사·코멘트는 그대로 남고 경고만 남긴다 (대시보드 장애가 PR 을 막지 않게)
+- 통과·차단 기준은 `report.sh` 와 같다. 검사 코드(.github/, policy/)를 바꾼 PR 은 차단으로 올린다
 
 ## 규칙을 바꿀 때
 
