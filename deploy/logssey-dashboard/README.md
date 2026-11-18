@@ -99,6 +99,20 @@ IaC 워커(`iac-worker`)는 그래프 보강, PR 경로 분석, State·드리프
 
 **확인**: `sudo docker compose ps iac-worker`가 재시작 없이 돈다. 자산 그래프(Neo4j)를 붙이기 전에는 그래프·분석 작업이 대기 상태로 남는다(오류 아님).
 
+### 자산 그래프 (Neo4j)
+
+`neo4j` 서비스(같은 compose, profile `iac`)가 IaC 자산 그래프를 둔다. 내부 네트워크(`backend`)에만 있고 호스트 포트가 없다. Bolt만 켜고(HTTP 끔) 데이터는 `/var/lib/logssey/neo4j`(데이터 EBS, 매일 스냅샷)에 둔다. 그래프는 매일 다시 수집하므로 잃어도 다시 만들 수 있다. 메모리 상한 1GB(heap 512MB, 페이지 캐시 256MB, 대기 시 약 460MB).
+
+- 비밀번호: `bootstrap-iac-host.py`가 처음 한 번 만들어 `secrets/neo4j/neo4j-auth`(Neo4j, 소유 7474)와 `secrets/iac-worker/logssey.iac.graph.password`(워커, 소유 10001)에 같은 값을 쓴다. 이미 있으면 그대로 둔다 (Neo4j는 데이터 폴더를 처음 만들 때만 비밀번호를 정한다)
+- 배포 워크플로가 띄우지 않는다. 이미지를 바꿀 때는 이 저장소의 `bootstrap-iac-host.py` digest를 고친 뒤 호스트 `compose.yaml`의 같은 줄을 바꾸고 `docker compose up -d neo4j`
+
+**처음 한 번 (워커를 이미 설치한 호스트)**
+
+1. 이 폴더의 `bootstrap-iac-host.py`, `iac-worker.properties`를 호스트 `/opt/logssey`에 다시 복사
+2. `sudo python3 bootstrap-iac-host.py` → `compose.yaml`에 `neo4j`만 추가, 데이터 폴더·비밀번호 파일 생성 (`iac-worker`는 이미 있으면 건드리지 않음)
+3. `sudo docker compose up -d neo4j` → `sudo docker compose ps neo4j`가 `healthy`
+4. 워커가 떠 있으면 `sudo docker compose up -d --force-recreate iac-worker` (새 설정·비밀번호 파일을 읽게)
+
 **IaC 테이블을 새로 만들 때**: `iac-db-role.sh`에 GRANT를 더하고 호스트에서 다시 실행한다.
 
 ```bash
