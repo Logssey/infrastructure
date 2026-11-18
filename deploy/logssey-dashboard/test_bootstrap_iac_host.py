@@ -86,6 +86,37 @@ class BootstrapIacHostTest(unittest.TestCase):
             self.assertEqual((root / "secrets/neo4j/neo4j-auth").read_text(), auth)
             self.assertEqual((root / "secrets/iac-worker/logssey.iac.graph.password").read_text(), worker)
 
+    def test_a_host_bootstrapped_before_the_collection_step_gets_only_the_collector(self):
+        without_collector = self.compose.replace(iac.COLLECTOR_SERVICE + "\n", "", 1)
+        self.assertNotIn("\n  cartography:\n", without_collector)
+        patched = iac.patch_compose(without_collector)
+        for name in ("iac-worker", "neo4j", "cartography"):
+            self.assertEqual(patched.count(f"\n  {name}:\n"), 1)
+
+    def test_collector_gets_the_graph_password_and_one_kept_token_for_the_api(self):
+        with tempfile.TemporaryDirectory() as folder, \
+                unittest.mock.patch.object(iac.os, "chown") as chown, unittest.mock.patch.object(iac.os, "fchmod"), \
+                unittest.mock.patch.object(iac.os, "chmod"):
+            root = Path(folder)
+            (root / "secrets/api").mkdir(parents=True)
+            iac.ensure_collector_files(root, "graph-password")
+            self.assertEqual((root / "secrets/cartography/neo4j-password").read_text(), "graph-password")
+            token = (root / "secrets/iac-collector/api-token").read_text()
+            self.assertGreaterEqual(len(token), 32)  # the API rejects shorter tokens
+            self.assertEqual((root / "secrets/api/logssey.iac.collector-token").read_text(), token)
+            chown.assert_any_call(root / "secrets/iac-collector/api-token", 0, 0)
+            chown.assert_any_call(root / "secrets/api/logssey.iac.collector-token", 10001, 10001)
+            iac.ensure_collector_files(root, "graph-password")  # again: the token stays
+            self.assertEqual((root / "secrets/api/logssey.iac.collector-token").read_text(), token)
+
+    def test_collector_needs_the_existing_api_secrets_folder(self):
+        with tempfile.TemporaryDirectory() as folder, \
+                unittest.mock.patch.object(iac.os, "chown"), unittest.mock.patch.object(iac.os, "fchmod"), \
+                unittest.mock.patch.object(iac.os, "chmod"):
+            with self.assertRaises(SystemExit):
+                iac.ensure_collector_files(Path(folder), "graph-password")
+            self.assertFalse((Path(folder) / "secrets/api").exists(), "the API folder is never created here")
+
     def test_placeholder_names_the_real_repository_so_deploy_sh_can_pull(self):
         registry = "123456789012.dkr.ecr.ap-northeast-1.amazonaws.com"
         env = f"API_IMAGE={registry}/logssey/dashboard-api@sha256:{'a' * 64}\n"
@@ -108,7 +139,7 @@ class BootstrapIacHostTest(unittest.TestCase):
 
 def strip_iac(text):
     """The file as it was before the IaC additions."""
-    for block in (iac.COMPOSE_SERVICE + "\n", iac.GRAPH_SERVICE + "\n", iac.DEPLOY_SETTLE, iac.DEPLOY_CASE, iac.DEPLOY_HEALTH,
+    for block in (iac.COMPOSE_SERVICE + "\n", iac.GRAPH_SERVICE + "\n", iac.COLLECTOR_SERVICE + "\n", iac.DEPLOY_SETTLE, iac.DEPLOY_CASE, iac.DEPLOY_HEALTH,
                   iac.DEPLOY_FIRST_ROLLBACK):
         text = text.replace(block, "", 1)
     return text
