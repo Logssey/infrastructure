@@ -20,7 +20,11 @@ import shutil
 import subprocess
 import tempfile
 
-PLACEHOLDER_IMAGE = "iac-worker-not-configured@sha256:" + "0" * 64
+# deploy.sh keeps the repository of the current .env value and swaps only the digest, so the placeholder
+# must already name the real ECR repository (same registry as API_IMAGE). The zero digest marks "never deployed".
+IAC_REPOSITORY = "logssey/dashboard-iac-worker"
+ZERO_DIGEST = "sha256:" + "0" * 64
+OLD_PLACEHOLDER = "iac-worker-not-configured@" + ZERO_DIGEST  # written by the first bootstrap; never pullable
 
 COMPOSE_SERVICE = """\
   # IaC security worker (dashboard-backend iac-worker, Dockerfile --target iac-worker; IaC security ADR-13).
@@ -172,6 +176,24 @@ def patch_deploy_script(text):
     return text
 
 
+def placeholder_image(env_text):
+    """<registry>/logssey/dashboard-iac-worker@sha256:0...0, with the registry of API_IMAGE."""
+    api = next((line.split("=", 1)[1] for line in env_text.splitlines() if line.startswith("API_IMAGE=")), "")
+    registry = api.split("/", 1)[0] if "/" in api else ""
+    if not registry or "." not in registry:
+        raise RuntimeError(".env: API_IMAGE does not name a registry (expected <registry>/logssey/dashboard-api@sha256:...)")
+    return f"{registry}/{IAC_REPOSITORY}@{ZERO_DIGEST}"
+
+
+def set_iac_image(env_text):
+    """Add the placeholder, or replace the unpullable one from the first bootstrap. A deployed image stays."""
+    placeholder = placeholder_image(env_text)
+    lines = env_text.splitlines()
+    if "IAC_WORKER_IMAGE=" + OLD_PLACEHOLDER in lines:
+        return env_text.replace("IAC_WORKER_IMAGE=" + OLD_PLACEHOLDER, "IAC_WORKER_IMAGE=" + placeholder)
+    return set_env(env_text, "IAC_WORKER_IMAGE", placeholder)
+
+
 def set_env(text, key, value):
     lines = text.splitlines()
     if any(line.startswith(key + "=") for line in lines):
@@ -249,7 +271,7 @@ def main():
 
     ensure_session_directory(root)
     ensure_graph_files(root, Path(args.graph_data))
-    atomic_write(env_file, set_env(env_file.read_text(encoding="utf-8"), "IAC_WORKER_IMAGE", PLACEHOLDER_IMAGE), 0o600)
+    atomic_write(env_file, set_iac_image(env_file.read_text(encoding="utf-8")), 0o600)
     atomic_write(compose, patch_compose(compose.read_text(encoding="utf-8")), 0o644)
     atomic_write(deploy, patch_deploy_script(deploy.read_text(encoding="utf-8")), 0o755)
 
