@@ -137,6 +137,14 @@ IaC 워커(`iac-worker`)는 그래프 보강, PR 경로 분석, State·드리프
 
 **확인**: 대시보드 IaC 작업 목록에 수집(SYSTEM)·그래프 보강이 성공으로 남는다. `systemctl list-timers logssey-iac-collector.timer`에 다음 03:00이 보인다.
 
+### 검사 대상 레포와 데이터 등급
+
+경로 분석은 `iac_data_assets`에 등록한 자산에서 경로를 끝내고, State 점검은 여기의 TFSTATE 버킷을 읽는 주체를 센다. 비어 있으면 열린 경로가 0이고 `/gates`도 데이터가 없다. 환경마다 ARN이 달라 마이그레이션이 아니라 `iac-data-assets.sql`로 등록한다(규칙 명세 "데이터 등급").
+
+- 실행 (여러 번 실행해도 같음): `sudo docker compose exec -T db psql -v ON_ERROR_STOP=1 -U postgres -d logssey < iac-data-assets.sql` → 마지막 표에 등급·종류별 개수와 레포가 나온다
+- 반영: 다음 매일 수집 뒤 보강부터. 바로 보려면 `sudo systemctl start logssey-iac-collector.service`
+- 자원이 생기거나 없어지면 이 파일을 고치고 다시 실행한다. 목록에서 뺀 자산은 지워지지 않으니 필요하면 따로 지운다
+
 **IaC 테이블을 새로 만들 때**: `iac-db-role.sh`에 GRANT를 더하고 호스트에서 다시 실행한다.
 
 ```bash
