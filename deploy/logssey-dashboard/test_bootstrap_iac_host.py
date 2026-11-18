@@ -62,6 +62,30 @@ class BootstrapIacHostTest(unittest.TestCase):
             chown.assert_called_once_with(directory, 0, 0)
             iac.ensure_session_directory(Path(folder))  # already there: no error
 
+    def test_a_host_bootstrapped_before_the_graph_step_gets_only_the_graph(self):
+        without_graph = self.compose.replace(iac.GRAPH_SERVICE + "\n", "", 1)
+        self.assertIn("\n  iac-worker:\n", without_graph)
+        self.assertNotIn("\n  neo4j:\n", without_graph)
+        patched = iac.patch_compose(without_graph)
+        self.assertEqual(patched.count("\n  iac-worker:\n"), 1)
+        self.assertEqual(patched.count("\n  neo4j:\n"), 1)
+
+    def test_graph_password_is_shared_and_kept(self):
+        with tempfile.TemporaryDirectory() as folder, \
+                unittest.mock.patch.object(iac.os, "chown"), unittest.mock.patch.object(iac.os, "fchmod"), \
+                unittest.mock.patch.object(iac.os, "chmod"):  # root on the host; here keep folders writable
+            root, data = Path(folder), Path(folder) / "neo4j-data"
+            iac.ensure_graph_files(root, data)
+            auth = (root / "secrets/neo4j/neo4j-auth").read_text()
+            worker = (root / "secrets/iac-worker/logssey.iac.graph.password").read_text()
+            self.assertEqual(auth, "neo4j/" + worker)
+            self.assertGreaterEqual(len(worker), 40)
+            self.assertTrue(data.is_dir())
+            (root / "secrets/iac-worker/logssey.iac.graph.password").unlink()
+            iac.ensure_graph_files(root, data)  # again: the existing password stays
+            self.assertEqual((root / "secrets/neo4j/neo4j-auth").read_text(), auth)
+            self.assertEqual((root / "secrets/iac-worker/logssey.iac.graph.password").read_text(), worker)
+
     def test_env_keeps_an_existing_image(self):
         self.assertEqual(iac.set_env("A=1\nIAC_WORKER_IMAGE=x@sha256:1\n", "IAC_WORKER_IMAGE", "y"),
                          "A=1\nIAC_WORKER_IMAGE=x@sha256:1\n")
@@ -70,7 +94,7 @@ class BootstrapIacHostTest(unittest.TestCase):
 
 def strip_iac(text):
     """The file as it was before the IaC additions."""
-    for block in (iac.COMPOSE_SERVICE + "\n", iac.DEPLOY_SETTLE, iac.DEPLOY_CASE, iac.DEPLOY_HEALTH,
+    for block in (iac.COMPOSE_SERVICE + "\n", iac.GRAPH_SERVICE + "\n", iac.DEPLOY_SETTLE, iac.DEPLOY_CASE, iac.DEPLOY_HEALTH,
                   iac.DEPLOY_FIRST_ROLLBACK):
         text = text.replace(block, "", 1)
     return text

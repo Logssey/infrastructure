@@ -15,6 +15,7 @@ import argparse
 import datetime as dt
 import os
 from pathlib import Path
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -66,6 +67,52 @@ COMPOSE_SERVICE = """\
       options: {max-size: 10m, max-file: "3"}
 """
 
+# Asset graph (IaC security ADR-13). Same image as the former in-cluster graph (gitops iac/graph/neo4j.yaml).
+# Only on the internal network, no host port. Bolt only (HTTP off). Data on the data EBS (daily snapshots);
+# the graph is collected again every day, so it holds nothing that cannot be rebuilt.
+# Read-only root: the entrypoint writes its settings into conf/, so conf/, logs, run and /tmp are tmpfs
+# (/tmp needs exec for the JNA native library). The health check is a TCP probe, not a JVM client.
+GRAPH_SERVICE = """\
+  # IaC security asset graph (Neo4j; IaC security ADR-13). Only iac-worker (and the collector) reach it.
+  neo4j:
+    profiles: [iac]
+    image: neo4j:5.26.30-community@sha256:3388e05ee53c8313d01acdf33e63ad175af95a92226dc8551160564439ce2c8c
+    user: "7474:7474"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    stop_grace_period: 60s
+    mem_limit: 1g
+    pids_limit: 256
+    environment:
+      NEO4J_AUTH_FILE: /run/secrets/neo4j-auth
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
+      NEO4J_server_http_enabled: "false"
+      NEO4J_server_https_enabled: "false"
+      NEO4J_dbms_usage__report_enabled: "false"
+    volumes:
+      - /var/lib/logssey/neo4j:/data
+      - ./secrets/neo4j:/run/secrets:ro
+    tmpfs:
+      - "/tmp:rw,exec,nosuid,size=64m,uid=7474,gid=7474"
+      - "/logs:rw,noexec,nosuid,size=64m,uid=7474,gid=7474"
+      - "/var/lib/neo4j/run:rw,noexec,nosuid,size=8m,uid=7474,gid=7474"
+      - "/var/lib/neo4j/conf:rw,noexec,nosuid,size=8m,uid=7474,gid=7474"
+    healthcheck:
+      test: ["CMD", "bash", "-c", ":> /dev/tcp/127.0.0.1/7687"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks: [backend]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+"""
+
 DEPLOY_CASE = "  iac-worker) var=IAC_WORKER_IMAGE container=iac-worker ;;\n"
 DEPLOY_SETTLE = "IAC_WORKER_SETTLE=${LOGSSEY_IAC_WORKER_SETTLE:-60}\n"
 # No heartbeat table: healthy when it keeps running without a restart (a bad setting or DB login stops it)
@@ -98,12 +145,15 @@ def replace_once(text, old, new, what):
 
 
 def patch_compose(text):
-    if "\n  iac-worker:\n" in text:
-        return text
+    """Add each IaC service that is not there yet (a host bootstrapped before the graph step gets only neo4j)."""
     marker = "\nnetworks:\n"
-    if text.count(marker) != 1:
-        raise RuntimeError("compose: top-level networks section was not found exactly once")
-    return text.replace(marker, "\n" + COMPOSE_SERVICE + marker)
+    for name, block in (("iac-worker", COMPOSE_SERVICE), ("neo4j", GRAPH_SERVICE)):
+        if f"\n  {name}:\n" in text:
+            continue
+        if text.count(marker) != 1:
+            raise RuntimeError("compose: top-level networks section was not found exactly once")
+        text = text.replace(marker, "\n" + block + marker)
+    return text
 
 
 def patch_deploy_script(text):
@@ -138,6 +188,34 @@ def ensure_session_directory(root):
     return directory
 
 
+def ensure_graph_files(root, data):
+    """Neo4j data folder and one generated password, written for Neo4j (7474) and for the worker (10001).
+
+    An existing password is kept: Neo4j sets it only when the data folder is first initialised.
+    """
+    data.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chown(data, 7474, 7474)
+    os.chmod(data, 0o700)
+    graph_secrets = root / "secrets" / "neo4j"
+    worker_secrets = root / "secrets" / "iac-worker"
+    for directory, uid in ((graph_secrets, 7474), (worker_secrets, 10001)):
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chown(directory, uid, uid)
+        os.chmod(directory, 0o500)
+    auth = graph_secrets / "neo4j-auth"
+    if auth.exists():
+        password = auth.read_text(encoding="utf-8").split("/", 1)[1]
+    else:
+        password = secrets.token_urlsafe(32)
+        write_secret(auth, "neo4j/" + password, 7474)
+    write_secret(worker_secrets / "logssey.iac.graph.password", password, 10001)
+
+
+def write_secret(path, value, uid):
+    atomic_write(path, value, 0o400)
+    os.chown(path, uid, uid)
+
+
 def atomic_write(path, text, mode):
     descriptor, temporary = tempfile.mkstemp(prefix="." + path.name + "-", dir=path.parent)
     try:
@@ -155,6 +233,7 @@ def atomic_write(path, text, mode):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=os.environ.get("LOGSSEY_DIR", "/opt/logssey"))
+    parser.add_argument("--graph-data", default="/var/lib/logssey/neo4j", help="Neo4j data folder (data EBS)")
     args = parser.parse_args()
     if os.geteuid() != 0:
         raise SystemExit("run as root")
@@ -169,13 +248,14 @@ def main():
         shutil.copy2(path, path.with_name(f"{path.name}.bak-{stamp}"))
 
     ensure_session_directory(root)
+    ensure_graph_files(root, Path(args.graph_data))
     atomic_write(env_file, set_env(env_file.read_text(encoding="utf-8"), "IAC_WORKER_IMAGE", PLACEHOLDER_IMAGE), 0o600)
     atomic_write(compose, patch_compose(compose.read_text(encoding="utf-8")), 0o644)
     atomic_write(deploy, patch_deploy_script(deploy.read_text(encoding="utf-8")), 0o755)
 
     subprocess.run(["bash", "-n", str(deploy)], check=True)
     subprocess.run(["docker", "compose", "--profile", "iac", "-f", str(compose), "config", "--quiet"], cwd=root, check=True)
-    print(f"IaC worker host configuration prepared (backups *.bak-{stamp}); the worker is not started.")
+    print(f"IaC worker host configuration prepared (backups *.bak-{stamp}); the worker and the graph are not started.")
 
 
 if __name__ == "__main__":
