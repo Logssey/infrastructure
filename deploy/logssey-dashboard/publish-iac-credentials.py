@@ -22,8 +22,8 @@ _SPEC = importlib.util.spec_from_file_location(
 publisher = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(publisher)
 
-# Containers that receive a session. The collector (Cartography) is added in the collection step.
-COMPONENTS = ("worker",)
+# Containers that receive a session: the IaC worker and the daily Cartography collector.
+COMPONENTS = ("worker", "collector")
 
 
 def validate_config(config):
