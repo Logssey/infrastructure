@@ -113,6 +113,30 @@ IaC 워커(`iac-worker`)는 그래프 보강, PR 경로 분석, State·드리프
 3. `sudo docker compose up -d neo4j` → `sudo docker compose ps neo4j`가 `healthy`
 4. 워커가 떠 있으면 `sudo docker compose up -d --force-recreate iac-worker` (새 설정·비밀번호 파일을 읽게)
 
+### 매일 수집 (Cartography)
+
+매일 03:00 KST에 `logssey-iac-collector.timer`가 `run-iac-collector.sh`를 돌린다. 스크립트는 `cartography` 서비스(compose profile `iac-collect`, 한 번 돌고 끝남)로 그래프를 새로 수집한 뒤, 결과(성공·실패, 걸린 시간)를 이 호스트의 대시보드(`127.0.0.1:8088` → API)에 수집기 토큰으로 기록한다. 성공하면 API가 그래프 보강(열린 경로 계산)과 State 점검을 한 번씩 등록하고 IaC 워커가 처리한다.
+
+- AWS: 수집 역할 `logssey-dashboard-role-iac-collector` (관리형 SecurityAudit, 시크릿 값·버킷 객체 읽기는 명시적 거부. 클러스터의 scanner-ro와 같다). 세션은 같은 IaC 세션 타이머가 `aws-iac/collector`에 둔다(세션 이름 `logssey-iac-collector`)
+- 범위: 도쿄 리전, 경로 분석이 읽는 항목만 (`bootstrap-iac-host.py`의 `COLLECTOR_SERVICE`). 11/18 로컬 측정 약 4.5분, 메모리 최대 약 260MB
+- 권한 매핑: `cartography-permission-relationships.yaml`을 절대 경로로 넘긴다. 빠지면 수집은 성공해도 `CAN_READ`가 없어 모든 경로가 닫힌다
+- 비밀 파일 (`bootstrap-iac-host.py`가 만들고, 있으면 그대로 둔다)
+  - `secrets/cartography/neo4j-password`: 그래프 비밀번호 (소유 10001). 컨테이너 안에서 읽어 compose·`docker inspect`에 보이지 않는다
+  - `secrets/iac-collector/api-token`: 수집기 토큰 (root 전용). 스크립트는 헤더를 임시 파일로 넘겨 프로세스 인자에 남기지 않는다
+  - `secrets/api/logssey.iac.collector-token`: 같은 토큰 (API용, 소유 10001). API는 시작할 때 읽고, 없거나 32자보다 짧으면 모든 토큰을 거부한다
+
+**처음 한 번 (순서대로, 워커·그래프를 이미 설치한 호스트)**
+
+1. Terraform 적용: `terraform/environments/logssey-dashboard` (수집 역할 추가, 호스트 IaC 세션 정책에 수집 역할 추가)
+2. **스크립트를 바꾸기 전에** 호스트 `iac-credentials.json`에 `collector_role_arn`(Terraform 출력 `iac_collector_role_arn`)을 넣는다. 새 `publish-iac-credentials.py`는 이 값이 없으면 실패하고, 그러면 워커 세션도 갱신되지 않는다
+3. 이 폴더의 파일을 호스트 `/opt/logssey`에 복사: `publish-iac-credentials.py`, `bootstrap-iac-host.py`, `iac-worker.aws-config`, `cartography-permission-relationships.yaml`, `run-iac-collector.sh`(0755), `logssey-iac-collector.service`, `logssey-iac-collector.timer`
+4. `sudo systemctl start logssey-iac-credentials.service` → `aws-iac/collector/credentials.json`이 생기고 `aws-iac/worker/credentials.json`이 새로 바뀌었는지 확인
+5. `sudo python3 bootstrap-iac-host.py` → `compose.yaml`에 `cartography`만 추가, 비밀 파일 생성 (다른 서비스는 건드리지 않음)
+6. API가 토큰을 읽게 한다: 수집기 토큰을 받는 API(dashboard-backend `feature/iac-collector-token`)가 이 다음에 배포되면 따로 할 일이 없다
+7. `sudo cp logssey-iac-collector.* /etc/systemd/system/ && sudo systemctl daemon-reload` → `sudo systemctl start logssey-iac-collector.service`로 한 번 돌리고 `journalctl -u logssey-iac-collector`에서 `collection SUCCEEDED ..., recorded` 확인 → `sudo systemctl enable --now logssey-iac-collector.timer`
+
+**확인**: 대시보드 IaC 작업 목록에 수집(SYSTEM)·그래프 보강이 성공으로 남는다. `systemctl list-timers logssey-iac-collector.timer`에 다음 03:00이 보인다.
+
 **IaC 테이블을 새로 만들 때**: `iac-db-role.sh`에 GRANT를 더하고 호스트에서 다시 실행한다.
 
 ```bash

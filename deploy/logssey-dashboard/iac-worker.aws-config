@@ -1,4 +1,4 @@
-# IaC worker AWS profile (mounted read-only at /run/aws-config/config, AWS_CONFIG_FILE).
+# IaC containers' AWS profile (iac-worker and cartography; mounted read-only at /run/aws-config/config, AWS_CONFIG_FILE).
 # The session file is refreshed every 10 minutes by logssey-iac-credentials.timer; the SDK re-runs
 # the process before the session expires.
 [default]

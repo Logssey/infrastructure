@@ -1,10 +1,10 @@
 #!/usr/bin/python3
-"""Add the IaC security worker to the dashboard host in place (IaC security ADR-13).
+"""Add the IaC security worker, asset graph and daily collector to the dashboard host in place (IaC security ADR-13).
 
 The host compose.yaml and deploy.sh may hold other solutions' changes that are not in this repository
 (the Compliance worker bootstrap patches them in place), so they are never overwritten. This script
-only adds the iac-worker service, its deploy case and its health check, keeps a backup of every file it
-changes, and checks the result with `bash -n` and `docker compose config`. Running it again changes nothing.
+only adds the iac-worker, neo4j and cartography services, the iac-worker deploy case and health check,
+and the IaC secret files that are missing. It keeps a backup of every file it changes, and checks the result with `bash -n` and `docker compose config`. Running it again changes nothing.
 
 Run once on the host from /opt/logssey as root, after copying the IaC files of this folder there:
     python3 bootstrap-iac-host.py
@@ -117,6 +117,69 @@ GRAPH_SERVICE = """\
       options: {max-size: 10m, max-file: "3"}
 """
 
+# Daily asset graph collection (IaC security ADR-13). Same image and scope reasoning as the former in-cluster
+# CronJob (gitops iac/graph), limited to what path analysis reads: Tokyo and the syncs below.
+# Never a long-running service: run-iac-collector.sh starts it once a day (logssey-iac-collector.timer).
+# The password is read from a file inside the container so it never appears in compose or `docker inspect`.
+# The permission mapping file must be given as an absolute path: the image's default is relative and is
+# skipped silently, which closes every path (no CAN_READ).
+COLLECTOR_SERVICE = """\
+  # IaC security asset collection (Cartography; IaC security ADR-13). Read-only AWS session (collector role)
+  # and the graph only. Profile "iac-collect": no `up` starts it; run-iac-collector.sh runs it once a day.
+  cartography:
+    profiles: [iac-collect]
+    image: ghcr.io/cartography-cncf/cartography:0.143.0@sha256:be1621575ef598d678a63acc4ecf5995cad26d32b49a58f8cd939aae6b3379a7
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    init: true
+    restart: "no"
+    mem_limit: 1g
+    pids_limit: 256
+    depends_on:
+      neo4j: {condition: service_healthy}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - NEO4J_PASSWORD=$$(cat /run/secrets/neo4j-password) exec cartography "$$@"
+      - cartography
+    command:
+      - --neo4j-uri=bolt://neo4j:7687
+      - --neo4j-user=neo4j
+      - --neo4j-password-env-var=NEO4J_PASSWORD
+      - --selected-modules=create-indexes,aws
+      - --aws-regions=ap-northeast-1
+      - --aws-requested-syncs=iam,iaminstanceprofiles,s3,ec2:instance,ec2:security_group,ec2:network_interface,ec2:load_balancer_v2,ec2:load_balancer_v2:expose,rds,route53,cloudfront,secretsmanager,permission_relationships
+      - --permission-relationships-file=/etc/cartography/permission_relationships.yaml
+    environment:
+      AWS_CONFIG_FILE: /run/aws-config/config
+      AWS_DEFAULT_REGION: ap-northeast-1
+      AWS_STS_REGIONAL_ENDPOINTS: regional
+    volumes:
+      - type: bind
+        source: ./secrets/cartography
+        target: /run/secrets
+        read_only: true
+      - type: bind
+        source: ./aws-iac/collector
+        target: /run/aws
+        read_only: true
+      - type: bind
+        source: ./iac-worker.aws-config
+        target: /run/aws-config/config
+        read_only: true
+      - type: bind
+        source: ./cartography-permission-relationships.yaml
+        target: /etc/cartography/permission_relationships.yaml
+        read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m,uid=10001,gid=10001,mode=0700"]
+    networks: [backend]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+"""
+
 DEPLOY_CASE = "  iac-worker) var=IAC_WORKER_IMAGE container=iac-worker ;;\n"
 DEPLOY_SETTLE = "IAC_WORKER_SETTLE=${LOGSSEY_IAC_WORKER_SETTLE:-60}\n"
 # No heartbeat table: healthy when it keeps running without a restart (a bad setting or DB login stops it)
@@ -149,9 +212,9 @@ def replace_once(text, old, new, what):
 
 
 def patch_compose(text):
-    """Add each IaC service that is not there yet (a host bootstrapped before the graph step gets only neo4j)."""
+    """Add each IaC service that is not there yet (a host bootstrapped in an earlier step gets only the new ones)."""
     marker = "\nnetworks:\n"
-    for name, block in (("iac-worker", COMPOSE_SERVICE), ("neo4j", GRAPH_SERVICE)):
+    for name, block in (("iac-worker", COMPOSE_SERVICE), ("neo4j", GRAPH_SERVICE), ("cartography", COLLECTOR_SERVICE)):
         if f"\n  {name}:\n" in text:
             continue
         if text.count(marker) != 1:
@@ -231,6 +294,29 @@ def ensure_graph_files(root, data):
         password = secrets.token_urlsafe(32)
         write_secret(auth, "neo4j/" + password, 7474)
     write_secret(worker_secrets / "logssey.iac.graph.password", password, 10001)
+    return password
+
+
+def ensure_collector_files(root, graph_password):
+    """Graph password for the Cartography container, and one generated token for recording collections.
+
+    The token is written for the host script (root only) and for the API (configtree key
+    logssey.iac.collector-token, owner 10001). An existing token is kept. The API reads it when it starts.
+    """
+    cartography = root / "secrets" / "cartography"
+    collector = root / "secrets" / "iac-collector"
+    for directory, uid, mode in ((cartography, 10001, 0o500), (collector, 0, 0o700)):
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chown(directory, uid, uid)
+        os.chmod(directory, mode)
+    write_secret(cartography / "neo4j-password", graph_password, 10001)
+    token_file = collector / "api-token"
+    token = token_file.read_text(encoding="utf-8") if token_file.exists() else secrets.token_urlsafe(48)
+    write_secret(token_file, token, 0)
+    api = root / "secrets" / "api"
+    if not api.is_dir():
+        raise SystemExit(f"missing API secrets folder: {api}")
+    write_secret(api / "logssey.iac.collector-token", token, 10001)
 
 
 def write_secret(path, value, uid):
@@ -261,7 +347,8 @@ def main():
         raise SystemExit("run as root")
     root = Path(args.root).resolve()
     compose, deploy, env_file = root / "compose.yaml", root / "deploy.sh", root / ".env"
-    for path in (compose, deploy, env_file, root / "iac-worker.properties", root / "iac-worker.aws-config"):
+    for path in (compose, deploy, env_file, root / "iac-worker.properties", root / "iac-worker.aws-config",
+                 root / "cartography-permission-relationships.yaml", root / "run-iac-collector.sh"):
         if not path.is_file():
             raise SystemExit(f"missing required file: {path}")
 
@@ -270,14 +357,14 @@ def main():
         shutil.copy2(path, path.with_name(f"{path.name}.bak-{stamp}"))
 
     ensure_session_directory(root)
-    ensure_graph_files(root, Path(args.graph_data))
+    ensure_collector_files(root, ensure_graph_files(root, Path(args.graph_data)))
     atomic_write(env_file, set_iac_image(env_file.read_text(encoding="utf-8")), 0o600)
     atomic_write(compose, patch_compose(compose.read_text(encoding="utf-8")), 0o644)
     atomic_write(deploy, patch_deploy_script(deploy.read_text(encoding="utf-8")), 0o755)
 
     subprocess.run(["bash", "-n", str(deploy)], check=True)
     subprocess.run(["docker", "compose", "--profile", "iac", "-f", str(compose), "config", "--quiet"], cwd=root, check=True)
-    print(f"IaC worker host configuration prepared (backups *.bak-{stamp}); the worker and the graph are not started.")
+    print(f"IaC host configuration prepared (backups *.bak-{stamp}); the worker, the graph and the collector are not started.")
 
 
 if __name__ == "__main__":
