@@ -82,7 +82,7 @@ jq -r --slurpfile rules "$rules" --rawfile changed "$changed" '
       "",
       "대상 커밋 `\($res.head_sha[0:7])`",
       "",
-      "**② plan 전 검사**",
+      "**plan 전 검사**",
       "",
       (if ($f | length) == 0 then
          (if $res.gate == "success" then "발견 없음" else "gate 실행 실패 (규칙 발견 없이 멈춤). Actions 로그 확인 필요" end)

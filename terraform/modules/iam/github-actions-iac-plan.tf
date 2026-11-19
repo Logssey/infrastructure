@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────
 # IaC 보안 PR plan 전용 Role (plan-ro)
 #
-# infrastructure 레포의 PR 워크플로가 terraform plan 을 돌릴 때만 쓴다.
+# infrastructure 레포의 PR 워크플로와 main 매일 점검(iac-drift)이 terraform plan 을 돌릴 때만 쓴다.
 # 로컬 래퍼(make plan)에서도 목록의 IAM 사용자가 이 Role 의 임시 키로 plan 한다. (IaC 보안 ADR-12)
 # 읽기 전용이며, plan 에 필요 없는 데이터(시크릿 값, 버킷 객체 내용)는 명시적으로 거부한다.
 # apply 는 이 Role 로 할 수 없다. (IaC 보안 PRD SR-1, ADR-05)
@@ -26,12 +26,16 @@ data "aws_iam_policy_document" "iac_plan_assume" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # PR 이벤트만 허용한다. main 브랜치 실행(apply 용)은 받지 않는다.
+    # PR 이벤트와 environment iac-drift(main 만 쓰는 main 매일 점검)만 허용한다.
+    # main 브랜치 실행(apply 용, sub ...:ref:refs/heads/main)은 받지 않는다.
     # sub 형식은 github-actions.tf 와 같다 (2026-07-15 이후 생성 레포는 ID 접미사가 붙음).
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_org}@*/${var.iac_plan_repo}@*:pull_request"]
+      values = [
+        "repo:${var.github_org}@*/${var.iac_plan_repo}@*:pull_request",
+        "repo:${var.github_org}@*/${var.iac_plan_repo}@*:environment:iac-drift",
+      ]
     }
   }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────
-# IaC 보안 ② plan 전 검사 (gate)
+# IaC 보안 plan 전 검사 (gate)
 #
 # CI(iac-gate 워크플로)와 로컬 래퍼(make plan)가 같이 쓴다.
 # AWS 자격 증명 없이 돌고, 하나라도 차단이면 plan 전에 멈춘다.

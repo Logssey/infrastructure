@@ -5,6 +5,8 @@
 #   1. 단위 테스트: 위험 시나리오를 막고 정상 변경은 통과시키는지
 #   2. 오탐 검사: 지금 레포 코드에서 FAIL·WARN 이 하나도 없는지
 #   3. plan JSON 민감값 제거(scrub-plan.sh)가 sensitive 값을 모두 지우는지
+#   4. 대시보드 실행 등록 본문(dashboard-run.sh)이 report.sh 와 같은 기준으로 통과·차단을 정하는지
+#   5. "경로 분석" 검사·코멘트(path-report.sh)가 판정을 맞는 결론으로 바꾸는지
 # 를 확인한다. AWS 자격 증명은 쓰지 않는다.
 #
 # Action 은 커밋 SHA 로, Conftest 는 버전과 체크섬으로 고정한다 (IaC 보안 SR-3·SR-7).
@@ -53,3 +55,9 @@ jobs:
 
       - name: Scrub plan test
         run: policy/scrub-plan_test.sh
+
+      - name: Dashboard run test
+        run: policy/dashboard-run_test.sh
+
+      - name: Path report test
+        run: policy/path-report_test.sh

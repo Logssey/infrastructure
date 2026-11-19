@@ -1,0 +1,171 @@
+# ─────────────────────────────────────────────
+# IaC 보안 main 매일 점검 (main 기준 plan 전 검사 위반, 드리프트)
+#
+# 매일 02:30 KST 와 수동 실행. 예약 실행은 기본 브랜치(main) 코드로만 돈다.
+#   1. policy/gate.sh 로 main 전체를 검사 (관문 0·1 변경 감지는 비교 대상이 없어 생략)
+#   2. gate 를 통과하면 plan-ro Role 로 terraform plan (refresh 포함 → resource_drift)
+#   3. 결과와 민감값을 지운 plan 을 IaC 보안 대시보드에 올린다 (trigger PUSH, PR 번호 없음)
+#      → 대시보드 "plan 전 검사 위반 (main 기준)", 워커 CHECK_DRIFT → "실제 드리프트"
+#
+# environment iac-drift: main 만 쓰는 environment, 비밀값 없음. OIDC sub 가 environment 로 정해져
+#   - AWS: plan-ro Role 신뢰 정책이 이 sub 를 받는다 (modules/iam/github-actions-iac-plan.tf)
+#   - 대시보드: 이 sub 로는 main 점검(PUSH)만 등록할 수 있다 (PR 실행은 iac-report 의 iac-app)
+# 실패하면 워크플로가 실패로 남는다 (PR 과 무관). Action 은 커밋 SHA 로, 도구는 버전·체크섬으로 고정 (SR-3·SR-7).
+# ─────────────────────────────────────────────
+
+name: iac-drift
+
+on:
+  schedule:
+    - cron: "30 17 * * *" # 02:30 KST (03:00 그래프 수집과 겹치지 않게)
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: iac-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Main daily check
+    # 수동 실행도 main 에서만 (environment 도 main 으로 제한)
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: iac-drift
+    permissions:
+      contents: read
+      id-token: write # plan-ro Role assume, 대시보드 API 인증 (GitHub OIDC)
+    env:
+      CHECKPOINT_DISABLE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install tools (checksum verified)
+        env:
+          CONFTEST_VERSION: "0.71.1"
+          CONFTEST_SHA256: c3f6b2a753bd56e377a1e51a95ae3e057f926f2e9139f7d5b5dfbbaf810f7985
+          TERRAFORM_VERSION: "1.16.5"
+          TERRAFORM_SHA256: 2bc2fcfff033265c9e02ca0351f01794eb122f62a9b2a49a3294b9e49eaab5e4
+        # 레포 루트에 terraform/ 디렉터리가 있어 바이너리와 이름이 겹치므로 임시 디렉터리에서 받는다.
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -sSfLo conftest.tar.gz \
+            "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          echo "${CONFTEST_SHA256}  conftest.tar.gz" | sha256sum -c -
+          tar xzf conftest.tar.gz conftest
+          sudo install -m 0755 conftest /usr/local/bin/conftest
+
+          curl -sSfLo terraform.zip \
+            "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          echo "${TERRAFORM_SHA256}  terraform.zip" | sha256sum -c -
+          unzip -q terraform.zip terraform
+          sudo install -m 0755 terraform /usr/local/bin/terraform
+
+          conftest --version
+          terraform version
+
+      # 차단이 있어도 대시보드에 남기려고 다음 단계로 간다 (마지막 단계가 실패로 표시)
+      - name: Gate
+        id: gate
+        continue-on-error: true
+        env:
+          GATE_OUTPUT: github
+          GATE_FINDINGS: ${{ runner.temp }}/findings.jsonl
+          TF_IN_AUTOMATION: "1"
+        run: policy/gate.sh
+
+      - name: AWS credentials (plan-ro)
+        if: steps.gate.outcome == 'success'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.IAC_PLAN_ROLE_ARN }}
+          aws-region: ap-northeast-1
+          role-duration-seconds: 900
+
+      # iac-gate 의 Plan 과 같은 방식 (gate 가 검사한 .terraform-gate 의 모듈·프로바이더, -lock=false).
+      # refresh 를 하므로 plan JSON 의 resource_drift 에 코드 밖 변경이 담긴다.
+      - name: Plan
+        id: plan
+        if: steps.gate.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 10
+        working-directory: terraform/environments/prod
+        env:
+          TF_DATA_DIR: ${{ runner.temp }}/tfdata
+          TF_IN_AUTOMATION: "1"
+          TF_INPUT: "0"
+          TF_VAR_owner: ${{ vars.IAC_PLAN_OWNER }}
+        run: |
+          : "${TF_VAR_owner:?레포 변수 IAC_PLAN_OWNER 가 없음}"
+          mkdir "$TF_DATA_DIR"
+          cp -a .terraform-gate/modules "$TF_DATA_DIR/"
+          ln -s "$PWD/.terraform-gate/providers" "$TF_DATA_DIR/providers"
+          terraform init -lockfile=readonly >/dev/null
+          terraform plan -lock=false -out="$RUNNER_TEMP/tfplan" ||
+            { echo "::error::[gate.plan_failed] terraform plan 실패"; exit 1; }
+          terraform show -json "$RUNNER_TEMP/tfplan" >"$RUNNER_TEMP/plan.json"
+          ../../../policy/scrub-plan.sh "$RUNNER_TEMP/plan.json" >"$RUNNER_TEMP/plan.scrubbed.json"
+          rm "$RUNNER_TEMP/tfplan" "$RUNNER_TEMP/plan.json"
+          echo "드리프트 후보 $(jq '[.resource_drift[]?] | length' "$RUNNER_TEMP/plan.scrubbed.json")건 (분류는 대시보드)"
+
+      # 토큰은 로그에 가리고, curl 인자가 아니라 권한 0600 파일로 넘긴다.
+      - name: Send to dashboard
+        id: send
+        if: always() && vars.IAC_DASHBOARD_URL != ''
+        env:
+          DASHBOARD_URL: ${{ vars.IAC_DASHBOARD_URL }}
+          REPO: ${{ github.repository }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+        run: |
+          set -o pipefail
+          umask 077
+          touch "$RUNNER_TEMP/findings.jsonl"
+          [ "$PLAN_OUTCOME" != failure ] ||
+            jq -nc '{level: "block", msg: "[gate.plan_failed] terraform plan 실패"}' >>"$RUNNER_TEMP/findings.jsonl"
+          jq -n --arg sha "$GITHUB_SHA" --arg gate "$GATE_OUTCOME" --arg plan "${PLAN_OUTCOME:-skipped}" \
+                --slurpfile findings "$RUNNER_TEMP/findings.jsonl" \
+            '{version: 1, pr: null, head_sha: $sha, gate: $gate, plan: $plan, plan_counts: null, findings: $findings[0:200]}' \
+            >"$RUNNER_TEMP/result.json"
+
+          token=$(curl -sSf --max-time 30 -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+                    "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=logssey-iac" | jq -re .value)
+          echo "::add-mask::$token"
+          printf 'Authorization: Bearer %s\n' "$token" >"$RUNNER_TEMP/auth"
+          api="${DASHBOARD_URL%/}/api/v1/iac/runs"
+
+          policy/dashboard-run.sh "$RUNNER_TEMP/result.json" "$REPO" >"$RUNNER_TEMP/run.json"
+          created=$(curl -sS --fail-with-body --max-time 30 -H @"$RUNNER_TEMP/auth" -H 'Content-Type: application/json' \
+                      --data @"$RUNNER_TEMP/run.json" "$api") || { echo "::error::대시보드 실행 등록 실패: $created"; exit 1; }
+          run_id=$(jq -r .runId <<<"$created")
+          status=$(jq -r .status <<<"$created")
+          echo "대시보드 실행 등록: run $run_id ($status)"
+
+          plan="$RUNNER_TEMP/plan.scrubbed.json"
+          if [ "$status" = PLANNING ] && [ -f "$plan" ]; then
+            gzip -c "$plan" >"$RUNNER_TEMP/plan.json.gz"
+            curl -sS --fail-with-body --max-time 60 -X PUT -H @"$RUNNER_TEMP/auth" -H 'Content-Type: application/gzip' \
+              --data-binary @"$RUNNER_TEMP/plan.json.gz" "$api/$run_id/plan" -o /dev/null ||
+              { echo "::error::plan 업로드 실패"; exit 1; }
+            echo "plan 업로드: 대시보드가 드리프트를 분류 중"
+          fi
+          {
+            echo "### IaC main 매일 점검"
+            echo ""
+            echo "- gate: $GATE_OUTCOME · plan: ${PLAN_OUTCOME:-skipped} · 대시보드 run $run_id ($status)"
+            echo "- 결과: IaC 보안 대시보드의 \"plan 전 검사 위반 (main 기준)\"·\"실제 드리프트\""
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      # gate 차단이나 plan 실패는 대시보드에 남긴 뒤 워크플로를 실패로 표시한다
+      - name: Result
+        if: always()
+        env:
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+        run: |
+          [ "$GATE_OUTCOME" = success ] || { echo "::error::main gate 차단 또는 실패"; exit 1; }
+          [ "$PLAN_OUTCOME" = success ] || { echo "::error::main plan 실패"; exit 1; }

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Logssey IaC security asset graph collection (03:00 KST)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Asia/Seoul
+AccuracySec=1min
+Persistent=true
+Unit=logssey-iac-collector.service
+
+[Install]
+WantedBy=timers.target
