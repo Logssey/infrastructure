@@ -232,8 +232,11 @@ jobs:
             gh api "repos/$REPO/check-runs" --input - --jq '"검사 등록: \(.html_url)"'
 
           # 요약 코멘트 = plan 전 검사 절(앞 단계의 body.md) + 경로 분석 절. 앞 단계가 단 코멘트를 고친다.
+          # 맨 위 제목은 두 결과 중 더 나쁜 쪽으로 (merge-comment.sh)
           id=$(gh api --paginate "repos/$REPO/issues/$pr/comments" \
                  --jq ".[] | select(.user.login == \"$BOT\" and (.body | startswith(\"<!-- logssey-iac -->\"))) | .id" | head -n1)
           [ -n "$id" ] || { echo "::warning::요약 코멘트를 찾지 못해 경로 분석 절을 붙이지 않음"; exit 0; }
-          jq -n --rawfile gate "$RUNNER_TEMP/out/body.md" --rawfile path "$out/section.md" '{body: ($gate + $path)}' |
+          policy/merge-comment.sh "$RUNNER_TEMP/out/body.md" "$(cat "$RUNNER_TEMP/out/conclusion")" \
+            "$out/section.md" "$(cat "$out/conclusion")" >"$out/comment.md"
+          jq -n --rawfile body "$out/comment.md" '{body: $body}' |
             gh api -X PATCH "repos/$REPO/issues/comments/$id" --input - --jq '"코멘트 고침: \(.html_url)"'

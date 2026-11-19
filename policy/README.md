@@ -11,6 +11,7 @@ PR 의 `.tf` 를 `terraform init`·`plan` 전에 Conftest 로 검사한다.
 | `module-hashes.txt` | 원격 모듈 내용 해시 기준 (관문 2b) |
 | `dashboard-run.sh` | `iac-report` 가 IaC 보안 대시보드에 올릴 실행 등록 본문 (테스트 `dashboard-run_test.sh`) |
 | `path-report.sh` | 대시보드의 경로 분석 결과로 "경로 분석" 검사·코멘트 절 만들기 (테스트 `path-report_test.sh`) |
+| `merge-comment.sh` | 요약 코멘트 합치기 (plan 전 검사 절 + 경로 분석 절, 맨 위 제목은 더 나쁜 결과로) |
 
 ## 실행
 

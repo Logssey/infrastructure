@@ -38,7 +38,9 @@ jq -r --arg dashboard "$dashboard" '
       "path.removed": "경로가 사라짐", "state.reader_increase": "State 읽기 주체 증가"
     }[.] // "알 수 없는 규칙";
   def enforcement: {"path.tier1.added": "차단", "path.removed": "정보"}[.] // "경고";
-  def hop: if .kind == "Internet" then "인터넷" else (.name | safe) end;
+  def hop: if .kind == "Internet" then "인터넷"
+           elif .kind == "AWSCloudFrontDistribution" then "CloudFront \(.name | tostring | split("/") | last | safe)"
+           else (.name | safe) end;
   def cause: if .cause.address then "`\(.cause.address | safe)` (\({CREATE: "추가", UPDATE: "변경", DELETE: "삭제", REPLACE: "교체"}[.cause.action] // "변경"))" else "-" end;
 
   . as $r
