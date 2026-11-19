@@ -10,8 +10,9 @@
 #     PR 이 검사 코드(.github/, policy/)를 바꿨으면 BLOCKED (report.sh 와 같은 기준, fail-closed)
 #   - 발견 건은 "[gate.규칙] 문구" 모양만 보낸다. 문구는 500자, 건수는 200건까지 (API 계약)
 #   - gate.check_code_changed 는 PR 코멘트 전용이라 보내지 않는다 (상태가 BLOCKED 로 대신한다)
+#   - PR 제목은 GitHub API 에서 받은 값을 256자까지 보낸다 (대시보드 PR 목록·상세에 텍스트로 표시)
 #
-# 사용법: policy/dashboard-run.sh result.json 레포(owner/name) [변경파일목록]
+# 사용법: policy/dashboard-run.sh result.json 레포(owner/name) [변경파일목록] [PR제목파일]
 # ─────────────────────────────────────────────
 
 set -euo pipefail
@@ -19,8 +20,9 @@ set -euo pipefail
 result=$1
 repo=$2
 changed=${3:-/dev/null}
+title=${4:-/dev/null}
 
-jq -c --arg repo "$repo" --rawfile changed "$changed" '
+jq -c --arg repo "$repo" --rawfile changed "$changed" --rawfile title "$title" '
   ([$changed | split("\n")[] | select(test("^(\\.github|policy)/"))] | length > 0) as $check_code_changed
   | [.findings[] | select(.msg | test("^\\[gate\\.[a-z_]+\\] "))
                  | select(.msg | startswith("[gate.check_code_changed]") | not)
@@ -30,4 +32,5 @@ jq -c --arg repo "$repo" --rawfile changed "$changed" '
   | {repo: $repo, headSha: .head_sha,
      gate: {status: (if $blocked then "BLOCKED" else "PASSED" end), findings: $findings}}
   + (if .pr == null then {trigger: "PUSH"} else {prNumber: .pr, trigger: "PR"} end)
+  + (.pr as $pr | $title | rtrimstr("\n") | if . == "" or $pr == null then {} else {prTitle: .[0:256]} end)
 ' "$result"
