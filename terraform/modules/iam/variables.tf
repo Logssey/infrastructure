@@ -38,7 +38,7 @@ variable "github_repos" {
 }
 
 variable "iac_plan_repo" {
-  description = "IaC 보안 PR plan Role(plan-ro)을 쓸 수 있는 레포. pull_request 이벤트만 허용한다."
+  description = "IaC 보안 plan Role(plan-ro)을 쓸 수 있는 레포. pull_request 이벤트와 environment iac-drift(main 매일 점검)만 허용한다."
   type        = string
   default     = "infrastructure"
 }

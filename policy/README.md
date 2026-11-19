@@ -81,6 +81,15 @@ plan-ro Role 을 쓸 수 있는 사람은 `terraform/environments/prod/main.tf` 
   - 대시보드에 닿지 못함·plan 없음·대기 시간 초과 → 중립
   - 아직 필수 검사가 아니다. 끝에서 끝 검증 뒤에 필수로 지정한다
 
+## main 매일 점검 (`iac-drift`)
+
+매일 02:30 KST(와 수동 실행)에 main 코드로 `gate.sh` 와 `terraform plan`(refresh 포함)을 돌려 결과를 대시보드에 올린다 (trigger PUSH).
+대시보드는 main 기준 ② 위반과, plan 의 `resource_drift` 로 분류한 ③ 드리프트를 보여 준다.
+
+- environment `iac-drift`: main 만 쓰고 비밀값이 없다. 이 sub 로 plan-ro Role 을 받고(신뢰 정책), 대시보드에는 main 점검만 등록할 수 있다
+- 레포 변수: `IAC_PLAN_ROLE_ARN`, `IAC_PLAN_OWNER`(iac-gate 와 같음), `IAC_DASHBOARD_URL`
+- gate 차단·plan 실패도 대시보드에 남긴 뒤 워크플로를 실패로 표시한다
+
 ## 규칙을 바꿀 때
 
 - PR 로만 바꾼다. 이 폴더는 CODEOWNERS 로 security-team 리뷰 대상이다.
