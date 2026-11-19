@@ -87,7 +87,8 @@ Pod 단위 권한 분리가 필요해지면 IRSA 구성 또는 Pod Identity 대�
 
 ## IRSA 자체 구성
 
-위 한계를 풀기 위해 OIDC 발급자를 직접 구성한다. IaC 보안의 매일 작업(scanner-ro)이 첫 사용처이고,
+위 한계를 풀기 위해 OIDC 발급자를 직접 구성한다. IaC 보안의 매일 작업(scanner-ro)이 첫 사용처였고
+(2026-11-19 대시보드 호스트로 옮기며 scanner-ro 는 삭제, IaC 보안 ADR-13),
 이후 ESO·Loki 처럼 노드 Role 을 함께 쓰는 Pod 도 각자 Role 로 옮길 수 있다.
 
 | 단계 | 내용 | 상태 |
