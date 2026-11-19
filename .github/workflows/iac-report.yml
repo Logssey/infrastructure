@@ -126,6 +126,7 @@ jobs:
         if: steps.post.outputs.current == 'true' && vars.IAC_DASHBOARD_URL != ''
         continue-on-error: true
         env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           DASHBOARD_URL: ${{ vars.IAC_DASHBOARD_URL }}
           REPO: ${{ github.repository }}
         run: |
@@ -138,7 +139,11 @@ jobs:
           printf 'Authorization: Bearer %s\n' "$token" >"$RUNNER_TEMP/auth"
           api="${DASHBOARD_URL%/}/api/v1/iac/runs"
 
-          policy/dashboard-run.sh "$RUNNER_TEMP/in/result.json" "$REPO" "$RUNNER_TEMP/changed.txt" >"$RUNNER_TEMP/run.json"
+          # PR 제목 (대시보드 PR 목록·상세 표시용). 못 받아도 등록은 한다
+          pr=$(jq -r .pr "$RUNNER_TEMP/in/result.json")
+          gh api "repos/$REPO/pulls/$pr" --jq .title >"$RUNNER_TEMP/title.txt" || : >"$RUNNER_TEMP/title.txt"
+          policy/dashboard-run.sh "$RUNNER_TEMP/in/result.json" "$REPO" "$RUNNER_TEMP/changed.txt" "$RUNNER_TEMP/title.txt" \
+            >"$RUNNER_TEMP/run.json"
           created=$(curl -sS --fail-with-body --max-time 30 -H @"$RUNNER_TEMP/auth" -H 'Content-Type: application/json' \
                       --data @"$RUNNER_TEMP/run.json" "$api") || warn "실행 등록 ($created)"
           run_id=$(jq -r .runId <<<"$created")
