@@ -7,7 +7,7 @@
 # 시뮬레이터는 워커가 넘긴 정책 문서만 평가하고 계정의 정책을 읽거나 바꾸지 않는다.
 #
 # 수집 역할(collector)은 호스트의 매일 Cartography 수집이 /opt/logssey/aws-iac/collector 세션으로 쓴다.
-# 클러스터의 scanner-ro(modules/k8s-oidc/scanner.tf)와 같은 권한이다: 관리형 SecurityAudit 에
+# 예전 클러스터 수집 역할(scanner-ro, 11/19 삭제)과 같은 권한이다: 관리형 SecurityAudit 에
 # 시크릿 값·버킷 객체 읽기 거부를 명시한다.
 # ─────────────────────────────────────────────
 
