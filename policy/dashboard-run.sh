@@ -3,6 +3,7 @@
 # IaC 보안 대시보드에 올릴 PR 실행 등록 본문 만들기 (POST /api/v1/iac/runs)
 #
 # iac-report 워크플로(기본 브랜치 코드)가 report.sh 로 형식을 검사한 result.json 으로 부른다.
+# iac-drift 워크플로(main 매일 점검)는 pr 이 null 인 result.json 으로 부른다 → trigger PUSH, PR 번호 없음.
 # 여기서는 API 를 부르지 않는다.
 #
 #   - gate 가 성공하지 않았거나, 차단 발견 건이 있거나, plan 이 실패했거나,
@@ -26,6 +27,7 @@ jq -c --arg repo "$repo" --rawfile changed "$changed" '
                  | {level, msg: .msg[0:500]}][0:200] as $findings
   | (.gate != "success" or .plan == "failure" or $check_code_changed
      or any(.findings[]; .level == "block")) as $blocked
-  | {repo: $repo, prNumber: .pr, headSha: .head_sha, trigger: "PR",
+  | {repo: $repo, headSha: .head_sha,
      gate: {status: (if $blocked then "BLOCKED" else "PASSED" end), findings: $findings}}
+  + (if .pr == null then {trigger: "PUSH"} else {prNumber: .pr, trigger: "PR"} end)
 ' "$result"

@@ -6,6 +6,7 @@
 #   1. 통과·차단 상태를 report.sh 와 같은 기준으로 정하는지
 #   2. 규칙 ID 가 있는 발견 건만, 길이를 잘라 보내는지
 #   3. 검사 코드를 바꾼 PR 은 차단으로 보내는지
+#   4. main 매일 점검(pr 없음)은 PUSH 로 보내는지
 # 를 확인한다.
 # ─────────────────────────────────────────────
 
@@ -50,6 +51,12 @@ check "검사 코드를 바꾼 PR 은 차단" "$(jq -r .gate.status <<<"$body")"
 check "검사 코드 변경 표시는 보내지 않음" "$(jq '.gate.findings | length' <<<"$body")" 0
 printf 'terraform/main.tf\n' >"$tmp/changed.txt"
 check "Terraform 만 바꾼 PR 은 통과" "$(./dashboard-run.sh "$tmp/result.json" Logssey/infrastructure "$tmp/changed.txt" | jq -r .gate.status)" PASSED
+
+jq -n --arg sha "$sha" '{version: 1, pr: null, head_sha: $sha, gate: "success", plan: "success", plan_counts: null,
+  findings: [{level: "warn", msg: "[gate.provider_unpinned] 버전 없음: terraform/x"}]}' >"$tmp/result.json"
+body=$(./dashboard-run.sh "$tmp/result.json" Logssey/infrastructure)
+check "main 매일 점검(pr 없음)은 PUSH, PR 번호 없음" "$(jq -c '[.trigger, has("prNumber"), .gate.status]' <<<"$body")" '["PUSH",false,"PASSED"]'
+check "main 점검도 발견 건을 보냄" "$(jq '.gate.findings | length' <<<"$body")" 1
 
 jq -n --arg sha "$sha" '{version: 1, pr: 58, head_sha: $sha, gate: "success", plan: "success", plan_counts: null,
   findings: [range(0; 250) | {level: "warn", msg: ("[gate.lock_changed] " + ("x" * 600))}]}' >"$tmp/result.json"
