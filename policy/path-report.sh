@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────
-# IaC 보안 "경로 분석" 검사 결과·코멘트 절 만들기 (① 경로 분석, ③ State)
+# IaC 보안 "경로 분석" 검사 결과·코멘트 절 만들기 (경로 분석, State)
 #
 # iac-report 워크플로(기본 브랜치 코드)가 대시보드 API 의 run 결과(GET /api/v1/iac/runs/{id}/result)로 부른다.
 # 여기서는 API 를 부르지 않는다.
 #
 #   - 판정: BLOCK → 실패, WARN → 중립, INFO·PASS → 성공
-#   - ② 에서 막혀 분석하지 못했으면 실패 ("건너뜀"으로 두면 필수 검사가 비어 병합될 수 있어서)
+#   - plan 전 검사에서 막혀 분석하지 못했으면 실패 ("건너뜀"으로 두면 필수 검사가 비어 병합될 수 있어서)
 #   - 분석이 끝나지 않았거나(대기 시간 초과) 오류면 중립
 #   - 그래프에서 온 이름·주소는 허용 문자·길이 안일 때만 그대로 쓰고, 아니면 표시하지 않는다
 #
 # 사용법: policy/path-report.sh run-result.json 출력디렉터리 대시보드주소
-#   출력: conclusion (success|neutral|failure), title, section.md (요약 코멘트에 붙일 ① 절)
+#   출력: conclusion (success|neutral|failure), title, section.md (요약 코멘트에 붙일 경로 분석 절)
 # ─────────────────────────────────────────────
 
 set -euo pipefail
@@ -57,10 +57,10 @@ jq -r --arg dashboard "$dashboard" '
 
   | ([
       "",
-      "**① 경로 분석: \($word)**",
+      "**경로 분석: \($word)**",
       "",
       (if $r.status != "DONE" then
-         (if $r.status == "GATE_FAILED" then "② 에서 막혀 plan·경로 분석을 하지 않았어요." else "결과가 아직 없어요." end)
+         (if $r.status == "GATE_FAILED" then "plan 전 검사에서 막혀 plan·경로 분석을 하지 않았어요." else "결과가 아직 없어요." end)
        else
          "새 경로 \($risky | map(select(.change == "ADDED")) | length) · 짧아짐 \($risky | map(select(.change == "SHORTENED")) | length) · 사라짐 \($removed | length)",
          (if ($risky | length) > 0 then
@@ -77,9 +77,9 @@ jq -r --arg dashboard "$dashboard" '
           else empty end),
          "",
          (if $state.ruleId == "state.reader_increase" then
-            "**③ State**: 경고 · `state.reader_increase` tfstate 를 읽을 수 있는 주체 \($state.readersBefore // "?") → \($state.readersAfter // "?")"
+            "**State**: 경고 · `state.reader_increase` tfstate 를 읽을 수 있는 주체 \($state.readersBefore // "?") → \($state.readersAfter // "?")"
           elif $state.readersAfter != null then
-            "**③ State**: 읽기 주체 변화 없음 (\($state.readersAfter))"
+            "**State**: 읽기 주체 변화 없음 (\($state.readersAfter))"
           else empty end)
        end),
       "",

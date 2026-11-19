@@ -1,5 +1,5 @@
 {
-  "_comment": "② gate 규칙의 강도·심각도·제목. security-solution-docs/iac-security/02-functional-design/rule-spec.md 와 같게 유지한다. PR 코멘트·검사 결과(policy/report.sh)가 쓴다.",
+  "_comment": "plan 전 검사(gate) 규칙의 강도·심각도·제목. security-solution-docs/iac-security/02-functional-design/rule-spec.md 와 같게 유지한다. PR 코멘트·검사 결과(policy/report.sh)가 쓴다.",
   "gate.exec_data_source": { "enforcement": "차단", "severity": "CRITICAL", "title": "plan 중 실행되는 data 소스" },
   "gate.provisioner": { "enforcement": "차단", "severity": "CRITICAL", "title": "local-exec·remote-exec provisioner" },
   "gate.lambda_invocation": { "enforcement": "차단", "severity": "HIGH", "title": "plan 중 Lambda 호출" },

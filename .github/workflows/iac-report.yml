@@ -5,7 +5,7 @@
 # iac-gate 가 남긴 iac-result 아티팩트를 받아 PR 에 검사 "plan 전 검사" 와 코멘트 하나를 등록한다.
 # 같은 결과와 민감값을 지운 plan 을 IaC 보안 대시보드(API)에도 올린다 (GitHub OIDC, aud logssey-iac).
 # 대시보드는 sub 가 이 environment(iac-app)인 토큰만 받는다. PR 코드(iac-gate)는 이 토큰을 받을 수 없다.
-# 분석이 끝나면 검사 "경로 분석"(차단이면 실패)을 등록하고 코멘트에 ① 경로 분석 절을 붙인다 (최대 5분 대기).
+# 분석이 끝나면 검사 "경로 분석"(차단이면 실패)을 등록하고 코멘트에 경로 분석 절을 붙인다 (최대 5분 대기).
 # 대시보드 전송이 실패해도 PR 검사·코멘트는 그대로 남는다 (경고만, "경로 분석"은 중립).
 #
 # App 키는 배포 브랜치를 main 으로 제한한 environment(iac-app)의 secret 이라 PR 코드는 읽을 수 없다.
@@ -157,7 +157,7 @@ jobs:
             echo "::notice::plan 이 없어 대시보드는 gate 결과만 가짐 (포크 PR 또는 plan 안 함)"
           fi
 
-      # 분석이 끝나기를 기다려(10초 간격, 최대 5분) "경로 분석" 검사를 등록하고 코멘트에 ① 절을 붙인다.
+      # 분석이 끝나기를 기다려(10초 간격, 최대 5분) "경로 분석" 검사를 등록하고 코멘트에 경로 분석 절을 붙인다.
       # 대시보드에 닿지 못했거나 plan 이 없으면 중립으로 등록한다 (필수 검사가 아니라 PR 을 막지 않음).
       - name: Path analysis check and comment
         if: always() && steps.post.outputs.current == 'true' && vars.IAC_DASHBOARD_URL != ''
@@ -181,7 +181,7 @@ jobs:
           fallback() { # 결론 제목 문구
             printf '%s\n' "$1" >"$out/conclusion"
             printf '%s\n' "경로 분석: $2" >"$out/title"
-            printf '\n**① 경로 분석: %s**\n\n%s\n' "$2" "$3" >"$out/section.md"
+            printf '\n**경로 분석: %s**\n\n%s\n' "$2" "$3" >"$out/section.md"
           }
 
           # OIDC 토큰은 몇 분만 유효해서 새로 받는다
@@ -226,9 +226,9 @@ jobs:
               output: {title: ($title | rtrimstr("\n")), summary: $body}}' |
             gh api "repos/$REPO/check-runs" --input - --jq '"검사 등록: \(.html_url)"'
 
-          # 요약 코멘트 = ② 절(앞 단계의 body.md) + ① 절. 앞 단계가 단 코멘트를 고친다.
+          # 요약 코멘트 = plan 전 검사 절(앞 단계의 body.md) + 경로 분석 절. 앞 단계가 단 코멘트를 고친다.
           id=$(gh api --paginate "repos/$REPO/issues/$pr/comments" \
                  --jq ".[] | select(.user.login == \"$BOT\" and (.body | startswith(\"<!-- logssey-iac -->\"))) | .id" | head -n1)
-          [ -n "$id" ] || { echo "::warning::요약 코멘트를 찾지 못해 ① 절을 붙이지 않음"; exit 0; }
+          [ -n "$id" ] || { echo "::warning::요약 코멘트를 찾지 못해 경로 분석 절을 붙이지 않음"; exit 0; }
           jq -n --rawfile gate "$RUNNER_TEMP/out/body.md" --rawfile path "$out/section.md" '{body: ($gate + $path)}' |
             gh api -X PATCH "repos/$REPO/issues/comments/$id" --input - --jq '"코멘트 고침: \(.html_url)"'

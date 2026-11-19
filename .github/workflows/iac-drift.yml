@@ -1,11 +1,11 @@
 # ─────────────────────────────────────────────
-# IaC 보안 main 매일 점검 (② main 기준 위반, ③ 드리프트)
+# IaC 보안 main 매일 점검 (main 기준 plan 전 검사 위반, 드리프트)
 #
 # 매일 02:30 KST 와 수동 실행. 예약 실행은 기본 브랜치(main) 코드로만 돈다.
 #   1. policy/gate.sh 로 main 전체를 검사 (관문 0·1 변경 감지는 비교 대상이 없어 생략)
 #   2. gate 를 통과하면 plan-ro Role 로 terraform plan (refresh 포함 → resource_drift)
 #   3. 결과와 민감값을 지운 plan 을 IaC 보안 대시보드에 올린다 (trigger PUSH, PR 번호 없음)
-#      → 대시보드 "② 위반 (main 기준)", 워커 CHECK_DRIFT → "실제 드리프트"
+#      → 대시보드 "plan 전 검사 위반 (main 기준)", 워커 CHECK_DRIFT → "실제 드리프트"
 #
 # environment iac-drift: main 만 쓰는 environment, 비밀값 없음. OIDC sub 가 environment 로 정해져
 #   - AWS: plan-ro Role 신뢰 정책이 이 sub 를 받는다 (modules/iam/github-actions-iac-plan.tf)
@@ -157,7 +157,7 @@ jobs:
             echo "### IaC main 매일 점검"
             echo ""
             echo "- gate: $GATE_OUTCOME · plan: ${PLAN_OUTCOME:-skipped} · 대시보드 run $run_id ($status)"
-            echo "- 결과: IaC 보안 대시보드의 \"② 위반 (main 기준)\"·\"실제 드리프트\""
+            echo "- 결과: IaC 보안 대시보드의 \"plan 전 검사 위반 (main 기준)\"·\"실제 드리프트\""
           } >>"$GITHUB_STEP_SUMMARY"
 
       # gate 차단이나 plan 실패는 대시보드에 남긴 뒤 워크플로를 실패로 표시한다
