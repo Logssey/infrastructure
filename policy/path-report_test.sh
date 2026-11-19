@@ -4,7 +4,7 @@
 #
 # 대시보드 run 결과 모양별로 "경로 분석" 검사가
 #   1. 판정(차단·경고·좋아짐·변화 없음)을 검사 결론으로 맞게 바꾸는지
-#   2. ② 에서 막힌 PR 은 "건너뜀"이 아니라 실패인지, 대기 시간 초과·오류는 중립인지
+#   2. plan 전 검사에서 막힌 PR 은 "건너뜀"이 아니라 실패인지, 대기 시간 초과·오류는 중립인지
 #   3. 새 경로·원인·State 를 코멘트 절에 보여 주고, 허용 밖 문자는 표시하지 않는지
 # 를 확인한다. 경로는 로컬 데모(#58 시나리오)의 실제 결과 모양이다.
 # ─────────────────────────────────────────────
@@ -61,7 +61,7 @@ report DONE '"PASS"' '[]' '[]' "$same"
 check "변화 없으면 성공" "$(cat "$tmp/out/title")" "경로 분석: 새 경로 없음"
 
 report GATE_FAILED '"BLOCK"' '[]' '[]' 'null'
-check "② 에서 막히면 건너뜀이 아니라 실패" "$(cat "$tmp/out/conclusion")" failure
+check "plan 전 검사에서 막히면 건너뜀이 아니라 실패" "$(cat "$tmp/out/conclusion")" failure
 
 report ANALYZING 'null' '[]' '[]' 'null'
 check "분석이 안 끝났으면 중립" "$(cat "$tmp/out/conclusion")" neutral

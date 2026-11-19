@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────
-# IaC 보안 ② plan 전 검사 (gate)
+# IaC 보안 plan 전 검사 (gate)
 #
 # terraform init·plan 은 코드를 실행한다 (data "external" 등).
 # 이 정책은 .tf 텍스트를 Conftest(hcl2 파서)로 읽어, 실행 구문과 공급망 위험을
