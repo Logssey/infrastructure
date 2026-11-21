@@ -18,6 +18,7 @@
   - 손으로 배포: 같은 명령을 root 로 `/opt/logssey/deploy.sh api sha256:…`
   - 바뀌지 않는 것: compose.yaml·api.properties·worker.properties 는 이 레포에서 고쳐 머지한 뒤 호스트에 손으로 덮어쓴다
 - DB 되돌리기(새 마이그레이션이 적용된 뒤 옛 API 로 돌아가야 할 때): `docker compose stop api frontend secret-worker` → `docker compose exec -T db dropdb -U postgres logssey` → `docker compose exec -T db createdb -U postgres -O logssey logssey` → `docker compose exec -T db pg_restore -U postgres -d logssey --no-owner --role=logssey < /var/lib/logssey/backups/<덤프>` → .env 를 옛 digest 로 → `docker compose up -d`
+- 옛 이미지 정리: `logssey-image-prune.timer`가 매일 05:00 KST에 `prune-dashboard-images.sh`를 돌린다. 대시보드 이미지(ECR `logssey/dashboard-*`) 중 컨테이너가 쓰지 않고 만든 지 3일 넘은 것만 지운다(되돌리기용 최근 이미지와 postgres·neo4j·cartography는 남김). deploy.sh가 옛 이미지를 지우지 않아 루트 볼륨이 차면 pull이 `no space left on device`로 실패한다(11/20). 호스트에 둘 때: 스크립트는 `/opt/logssey/`에 root 소유 0500, 유닛 두 개는 `/etc/systemd/system/`에 0644 → `systemctl daemon-reload` → `systemctl enable --now logssey-image-prune.timer`. 미리 보기는 `prune-dashboard-images.sh --dry-run`, 기록은 `journalctl -u logssey-image-prune`
 - DB 데이터: /var/lib/logssey (따로 붙인 EBS, 매일 스냅샷 7개)
 - 다른 서비스에 설치: variables.tf 의 VPC·서브넷 이름·service_domain·dashboard_host와 api.properties 의 logssey.reach.*·GitHub 로그인 설정을 맞춘다. API·워커의 연결 관리 계정·리전·비밀 경로는 Terraform의 source_credentials_config·source_secret_prefix 출력과 맞춘다 (ADR-D009)
 

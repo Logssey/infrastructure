@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily cleanup of old Logssey dashboard images (05:00 KST)
+
+[Timer]
+OnCalendar=*-*-* 05:00:00 Asia/Seoul
+AccuracySec=1min
+Persistent=true
+Unit=logssey-image-prune.service
+
+[Install]
+WantedBy=timers.target
