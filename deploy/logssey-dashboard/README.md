@@ -68,6 +68,8 @@ sudo systemctl list-timers logssey-source-credentials.timer
 
 Claude API 키는 `logssey/dashboard/ai/claude-api-key`라는 Secrets Manager 비밀의 문자열 값으로 관리한다. `api.properties`에는 비밀 이름과 리전을 설정한다. 대시보드 API는 `/run/aws/credentials.json`의 단기 API 역할 세션으로 값을 읽는다. 키 교체는 같은 비밀의 현재 버전을 갱신한다.
 
+보안 파트 리포트의 AI 대응 추천도 같은 비밀과 역할 세션을 쓴다. `api.properties`의 `logssey.report.ai.enabled=true`로 켜고, 리포트 기능이 들어간 API 이미지를 배포한 뒤 호스트 설정에 반영한다.
+
 `claude-api.tf`는 비밀 메타데이터를 참조하고 API 역할에 해당 비밀의 `GetSecretValue`, `DescribeSecret` 권한을 부여한다. 비밀을 먼저 생성한 뒤 Terraform을 적용한다. 키 값은 Terraform 입력이나 상태 파일에 넣지 않는다. 워커의 연결 비밀 조회 권한은 기존 source-credentials 경로를 사용한다.
 
 새 설정은 Secrets Manager 참조를 지원하는 API 이미지를 배포한 뒤 호스트의 `api.properties`에 반영한다. Claude 준비 상태와 합성 자료 기반 안내 요청, 제공자 오류 시 기본 안내 사용을 확인한다.
