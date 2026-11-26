@@ -95,7 +95,9 @@ sudo systemctl enable --now logssey-runtime-collector-secret.timer
 스크립트는 토큰을 `/opt/logssey/secrets/api/logssey.runtime.collector-token`에 UID 10001,
 모드 0400으로 원자 교체한다. 값이 바뀐 경우에만 API를 재생성하고 frontend를 재시작한다.
 재시작까지 성공한 해시를 별도 기록하므로 중간 실패는 다음 타이머 실행에서 다시 시도한다.
-토큰 값과 SDK 오류 내용은 로그에 남기지 않는다.
+적용 해시는 API 비밀 디렉터리의 소유권에 영향을 주지 않도록
+`/var/lib/logssey-runtime/collector-token.applied`에 분리한다. 토큰 값과 SDK 오류 내용은
+로그에 남기지 않는다.
 
 ### 로컬 검증
 

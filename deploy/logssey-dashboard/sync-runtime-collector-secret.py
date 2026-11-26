@@ -90,7 +90,7 @@ def main():
     parser.add_argument("--region", default="ap-northeast-1")
     parser.add_argument("--secret-id", default="logssey/dashboard/runtime/collector-token")
     parser.add_argument("--destination", default="/opt/logssey/secrets/api/logssey.runtime.collector-token")
-    parser.add_argument("--stamp", default="/opt/logssey/secrets/api/.runtime-collector-token.applied")
+    parser.add_argument("--stamp", default="/var/lib/logssey-runtime/collector-token.applied")
     args = parser.parse_args()
     try:
         os.umask(0o077)
