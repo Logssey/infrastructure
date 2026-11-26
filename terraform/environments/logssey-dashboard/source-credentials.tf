@@ -85,6 +85,35 @@ data "aws_iam_policy_document" "source" {
     resources = ["arn:${data.aws_partition.source_credentials.partition}:iam::${data.aws_caller_identity.source_credentials.account_id}:user/*"]
   }
 
+  # Usage history is read by the secret worker, never by the API role.
+  dynamic "statement" {
+    for_each = each.key == "worker" ? [1] : []
+    content {
+      sid       = "ResolveUsageKeyIdentity"
+      actions   = ["iam:GetUser"]
+      resources = ["arn:${data.aws_partition.source_credentials.partition}:iam::${data.aws_caller_identity.source_credentials.account_id}:user/*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = each.key == "worker" ? [1] : []
+    content {
+      sid       = "ReadApprovedRegionalUsage"
+      actions   = ["cloudtrail:LookupEvents"]
+      resources = ["*"]
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestedRegion"
+        values   = [var.region]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:PrincipalAccount"
+        values   = [data.aws_caller_identity.source_credentials.account_id]
+      }
+    }
+  }
+
   statement {
     sid       = "ReadRegionalSecretInventory"
     actions   = ["secretsmanager:ListSecrets", "ssm:DescribeParameters"]
