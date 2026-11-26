@@ -74,10 +74,34 @@ Claude API 키는 `logssey/dashboard/ai/claude-api-key`라는 Secrets Manager �
 
 새 설정은 Secrets Manager 참조를 지원하는 API 이미지를 배포한 뒤 호스트의 `api.properties`에 반영한다. Claude 준비 상태와 합성 자료 기반 안내 요청, 제공자 오류 시 기본 안내 사용을 확인한다.
 
+### 런타임 이벤트 수집 토큰
+
+Falcosidekick과 Dashboard API는 `logssey/dashboard/runtime/collector-token`이라는 단일
+Secrets Manager 비밀을 공유한다. 값은 32자 이상의 헤더 안전 문자열이며 Terraform 입력이나
+state에 넣지 않는다. 클러스터에서는 External Secrets Operator가 읽고, 대시보드 호스트에서는
+호스트 역할이 이 비밀 하나만 읽어 configtree 파일로 동기화한다.
+
+호스트에 동기화 파일을 설치한다.
+
+```bash
+sudo install -o root -g root -m 0500 sync-runtime-collector-secret.py /opt/logssey/
+sudo install -o root -g root -m 0644 logssey-runtime-collector-secret.service /etc/systemd/system/
+sudo install -o root -g root -m 0644 logssey-runtime-collector-secret.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl start logssey-runtime-collector-secret.service
+sudo systemctl enable --now logssey-runtime-collector-secret.timer
+```
+
+스크립트는 토큰을 `/opt/logssey/secrets/api/logssey.runtime.collector-token`에 UID 10001,
+모드 0400으로 원자 교체한다. 값이 바뀐 경우에만 API를 재생성하고 frontend를 재시작한다.
+재시작까지 성공한 해시를 별도 기록하므로 중간 실패는 다음 타이머 실행에서 다시 시도한다.
+토큰 값과 SDK 오류 내용은 로그에 남기지 않는다.
+
 ### 로컬 검증
 
 ```bash
 python3 -m unittest discover -s deploy/logssey-dashboard -p test_publish_aws_credentials.py
+python3 -m unittest discover -s deploy/logssey-dashboard -p test_sync_runtime_collector_secret.py
 terraform -chdir=terraform/environments/logssey-dashboard fmt -check
 ```
 
